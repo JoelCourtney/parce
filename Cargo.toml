@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 keywords = ["parser"]
 
 [dependencies]
-gen_parser_macro = { path = "/Users/joel/repos/gen_parser_macro" }
+parce_macros = "0.0.0"
 
 [lib]
 path = "src/lib.rs"

@@ -1,4 +1,4 @@
-pub use gen_parser_macro::lex;
+pub use parce_macros::lex;
 
 pub struct ParseError;
 pub struct LexError;

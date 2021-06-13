@@ -1,4 +1,4 @@
-use gen_parser_macro::lex;
+use parce_macros::lex;
 
 // #[lex]
 // pub enum Lexeme {
