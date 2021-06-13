@@ -13,13 +13,13 @@ pub fn lex(_args: TokenStream, input: TokenStream) -> TokenStream {
     let ident = input.ident.clone();
 
     (quote! {
-        #[derive(gen_parser_macro::LexAttributes)]
+        #[derive(parce_macros::LexAttributes)]
         #input
 
-        impl gen_parser::Lex for #ident {
+        impl parce::Lex for #ident {
 
-            fn lex(s: &mut str) -> Result<gen_parser::Lexeme<#ident>, gen_parser::LexError> {
-                use gen_parser::{Lexeme, LexError};
+            fn lex(s: &mut str) -> Result<parce::Lexeme<#ident>, parce::LexError> {
+                use parce::{Lexeme, LexError};
                 todo!()
             }
         }
