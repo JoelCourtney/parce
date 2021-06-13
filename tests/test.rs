@@ -27,6 +27,12 @@ pub enum Lexemes {
 
     #[set_mode = "default"] Zxcv = "zxcv"
 }
+
+#[test]
+fn test_parse() {
+    let mut lexer = LexemesLexer::default();
+    lexer.lex("hello", 0);
+}
 //
 // #[parse]
 // pub enum Number {
