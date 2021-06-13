@@ -72,33 +72,48 @@ pub fn lex(_args: TokenStream, input: TokenStream) -> TokenStream {
 
     let ident = input.ident.clone();
     let lexer_ident = format_ident!("{}Lexer", input.ident.clone());
-    let mode_idents: Vec<_> = modes.iter().map(|mode| format_ident!("{}", mode.to_camel_case())).collect();
+    let mode_idents: Vec<_> = modes.iter().map(|mode| format_ident!("{}", mode.to_class_case())).collect();
+
+    let struct_name = format!("{}PatternMatchers", input.ident.to_string());
+    let struct_ident = format_ident!("{}", struct_name);
 
     let mut pattern_matchers = vec![];
+    let mut lexemes = vec![];
     for info in &variant_info {
-        if !info.fragment {
-            pattern_matchers.push(
-                quote! {
-                    if let Some((data, length)) = todo!() {
-                        if let Some((_, longest_length)) = longest {
-                            if longest_length < length {
-                                longest = Some((data, length))
-                            }
-                        } else {
+        pattern_matchers.push(
+            quote! {
+                if let Some((data, length)) = todo!() {
+                    if let Some((_, longest_length)) = longest {
+                        if longest_length < length {
                             longest = Some((data, length))
                         }
+                    } else {
+                        longest = Some((data, length))
                     }
                 }
-            )
+            }
+        );
+        if !info.fragment {
+            let lexeme_ident = info.ident.clone();
+            lexemes.push(quote! {#ident::#lexeme_ident});
         }
     }
 
+
     (quote! {
-        #[derive(parce_macros::LexAttributes, variants_struct::VariantsStruct)]
+        #[derive(parce_macros::LexAttributes, variants_struct::VariantsStruct, Debug)]
+        #[struct_name = #struct_name]
+        #[struct_derive(Default)]
         #input
 
         enum #lexer_ident {
             #(#mode_idents),*
+        }
+
+        impl Default for #lexer_ident {
+            fn default() -> Self {
+                #lexer_ident::Default
+            }
         }
 
         impl parce::lexer::Lexer<#ident> for #lexer_ident {
@@ -106,7 +121,14 @@ pub fn lex(_args: TokenStream, input: TokenStream) -> TokenStream {
                 use parce::lexer::{Lexeme, LexError};
                 let mut longest: Option<(#ident, usize)> = None;
 
-                #(#pattern_matchers)*
+                let pattern_matchers: #struct_ident<i32> = #struct_ident {
+                    // #(#pattern_matchers)*
+                    ..Default::default()
+                };
+
+                for lexeme in &[#(#lexemes),*] {
+                    dbg!(pattern_matchers.get_unchecked(&lexeme));
+                }
 
                 match longest {
                     Some((data, length)) => Ok(Lexeme {
