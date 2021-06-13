@@ -10,7 +10,8 @@ license = "MIT OR Apache-2.0"
 keywords = ["parser"]
 
 [dependencies]
-parce_macros = "0.0.0"
+parce_macros = { path = "../parce_macros" }
+variants-struct = "0.1.1"
 
 [lib]
 path = "src/lib.rs"

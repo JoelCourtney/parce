@@ -1,13 +1,32 @@
-use parce_macros::lex;
+use parce::prelude::*;
 
-// #[lex]
-// pub enum Lexeme {
-//     #[frag] Digit = "[0-9]",
-//     Period = ".",
-//     Carrot = "^",
-//     Star = "*",
-//     Slash = "/"
-// }
+#[lex]
+pub enum Lexemes {
+    #[frag]
+    Digit = "[0-9]",
+
+    Period = "'.'",
+
+    Carrot = "'^'",
+
+    #[set_mode = "helo"]
+    Star = "'*'",
+
+    Slash = "'/'",
+
+    #[skip]
+    WhiteSpace = "[ \n\r\t]",
+
+    #[frag]
+    StringChar = "~( '\"' | '\\' | '\r' | '\n' )",
+
+    StringLiteral = r#" '"' StringChar* '"' "#,
+
+    #[mode = "helo"]
+    Asdf = "asdf",
+
+    #[set_mode = "default"] Zxcv = "zxcv"
+}
 //
 // #[parse]
 // pub enum Number {
