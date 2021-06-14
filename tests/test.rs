@@ -1,42 +1,28 @@
 use parce::prelude::*;
 
-#[lex]
+#[lexer(MyLexer)]
 pub enum Lexemes {
     // #[frag]
     // Digit = "[0-9]",
 
-    Period = "'.'",
-
-    Carrot = "'^'",
-
-    #[set_mode = "helo"]
-    Star = "'*'",
-
-    Slash = "'/'",
-
-    // #[skip]
+    #[skip]
     // WhiteSpace = "[ \n\r\t]",
+    WhiteSpace = "' '",
 
-    // #[frag]
-    // StringChar = "~( '\"' | '\\' | '\r' | '\n' )",
-    StringChar = "[asdf]",
+    #[frag]
+    StringChar = "[^\"\\\\\r\n]",
 
     StringLiteral = r#" '"' StringChar* '"' "#,
-    TestyBoi = "StringChar*",
-
-    #[mode = "helo"]
-    Asdf = "'asdf'",
-
-    #[set_mode = "default"] Zxcv = "'zxcv'"
 }
 
 #[test]
 fn test_parse() {
-    let mut lexer = LexemesLexer::default();
-    assert_eq!(lexer.lex(r#""asf""#), Ok(vec![Lexeme {
+    let mut lexer = MyLexer::default();
+    let result = lexer.lex(r#"   "Hello World!"  "#);
+    assert_eq!(result, Ok(vec![Lexeme {
         data: Lexemes::StringLiteral,
-        start: 0,
-        len: 5
+        start: 3,
+        len: 14
     }]));
 }
 

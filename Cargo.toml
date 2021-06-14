@@ -11,7 +11,9 @@ keywords = ["parser"]
 
 [dependencies]
 parce_macros = { path = "../parce_macros" }
-parce_core = { path = "../parce_core" }
+lazy_static = "1.4.0"
+regex = "1.5.4"
+colored = "2.0.0"
 
 [lib]
 path = "src/lib.rs"
