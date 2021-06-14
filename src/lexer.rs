@@ -4,8 +4,6 @@ use std::fmt::Formatter;
 pub struct LexerError {
     pub full: String,
     pub start: usize,
-    pub len: usize,
-    pub message: String,
     pub mode: String
 }
 
@@ -13,13 +11,28 @@ impl std::fmt::Display for LexerError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         use colored::Colorize;
 
+        let start = self.start.saturating_sub(10);
+        let end = std::cmp::min(self.full.len(), self.start + 10);
+        let short = format!("{}{}{}",
+            if start != 0 {
+                "..."
+            } else {
+                ""
+            },
+            &self.full[start..end],
+            if end != self.full.len() {
+                "..."
+            } else {
+                ""
+            }
+        );
+
         write!(
             f,
-            "{}\n{}{}\nLexer Error: {}\nLexer Mode: {}",
-            self.full,
-            " ".repeat(self.start),
-            "^".repeat(self.len).red(),
-            self.message,
+            "{}\n{}{}\nLexer Error: no possible lexemes matched this input\nLexer Mode: {}",
+            short,
+            " ".repeat(self.start - if start != 0 {start - 3} else {0}),
+            "^".red(),
             self.mode.bright_blue()
         )
     }

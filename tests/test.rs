@@ -12,18 +12,33 @@ pub enum Lexemes {
     #[frag]
     StringChar = "[^\"\\\\\r\n]",
 
-    StringLiteral = r#" '"' StringChar* '"' "#,
+    StringLiteral = r#" '"' StringChar{2,} '"' "#,
+
+    SomeThingElse = " 'c' ('a' 'b'+)+ "
 }
 
 #[test]
 fn test_parse() {
     let mut lexer = MyLexer::default();
-    let result = lexer.lex(r#"   "Hello World!"  "#);
-    assert_eq!(result, Ok(vec![Lexeme {
-        data: Lexemes::StringLiteral,
-        start: 3,
-        len: 14
-    }]));
+    let result = lexer.lex("   \"H\"  ");
+    match result {
+        Ok(o) => {dbg!(o);}
+        Err(e) => println!("{}", e)
+    }
+    // assert_eq!(result, Ok(vec![Lexeme {
+    //     data: Lexemes::StringLiteral,
+    //     start: 3,
+    //     len: 14
+    // }]));
+}
+
+#[test]
+fn test_group() {
+    let result = MyLexer::default().lex(" \"String time\" cabbababbbbb");
+    match result {
+        Ok(emes) => {dbg!(emes);}
+        Err(e) => println!("{}", e)
+    }
 }
 
 // #[parse]
