@@ -11,7 +11,7 @@ keywords = ["parser"]
 
 [dependencies]
 parce_macros = { path = "../parce_macros" }
-variants-struct = "0.1.1"
+parce_core = { path = "../parce_core" }
 
 [lib]
 path = "src/lib.rs"

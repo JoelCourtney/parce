@@ -2,8 +2,8 @@ use parce::prelude::*;
 
 #[lex]
 pub enum Lexemes {
-    #[frag]
-    Digit = "[0-9]",
+    // #[frag]
+    // Digit = "[0-9]",
 
     Period = "'.'",
 
@@ -14,26 +14,32 @@ pub enum Lexemes {
 
     Slash = "'/'",
 
-    #[skip]
-    WhiteSpace = "[ \n\r\t]",
+    // #[skip]
+    // WhiteSpace = "[ \n\r\t]",
 
-    #[frag]
-    StringChar = "~( '\"' | '\\' | '\r' | '\n' )",
+    // #[frag]
+    // StringChar = "~( '\"' | '\\' | '\r' | '\n' )",
+    StringChar = "[asdf]",
 
     StringLiteral = r#" '"' StringChar* '"' "#,
+    TestyBoi = "StringChar*",
 
     #[mode = "helo"]
-    Asdf = "asdf",
+    Asdf = "'asdf'",
 
-    #[set_mode = "default"] Zxcv = "zxcv"
+    #[set_mode = "default"] Zxcv = "'zxcv'"
 }
 
 #[test]
 fn test_parse() {
     let mut lexer = LexemesLexer::default();
-    lexer.lex("hello", 0);
+    assert_eq!(lexer.lex(r#""asf""#), Ok(vec![Lexeme {
+        data: Lexemes::StringLiteral,
+        start: 0,
+        len: 5
+    }]));
 }
-//
+
 // #[parse]
 // pub enum Number {
 //     Int(i32) = "0=(Digit+)",
