@@ -26,8 +26,8 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
             ident: variant.ident.clone(),
             pattern: match &variant.discriminant {
                 Some((_, syn::Expr::Lit(syn::ExprLit {
-                                            lit: syn::Lit::Str(lit_str), ..
-                                        }))) => lit_str.value(),
+                    lit: syn::Lit::Str(lit_str), ..
+                }))) => lit_str.value(),
                 _ => {
                     return Err(LexerPatternParseError(Box::new(variant.clone()), "discriminant must a str literal".to_string()));
                 }
@@ -121,7 +121,7 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
         #[derive(parce_macros::RemoveLexerAttributes, Debug, Eq, PartialEq, Copy, Clone, Hash)]
         #input
 
-        #[derive(Debug)]
+        #[derive(Debug, Eq, PartialEq, Copy, Clone)]
         enum #lexer_ident {
             #(#mode_idents),*
         }
@@ -173,8 +173,6 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
                         _ => return Err(LexerError {
                             full: s.to_string(),
                             start,
-                            len: s.len() - start,
-                            message: "no possible lexemes matched this input".to_string(),
                             mode: "default".to_string()
                         })
                     }
@@ -217,7 +215,15 @@ enum LexDiscriminantRule {
     Dot,
     Star(Box<LexDiscriminantRule>),
     Plus(Box<LexDiscriminantRule>),
-    Question(Box<LexDiscriminantRule>)
+    Question(Box<LexDiscriminantRule>),
+    Count(Box<LexDiscriminantRule>, usize, CountRuleMax)
+}
+
+#[derive(Clone, Debug, Hash)]
+enum CountRuleMax {
+    Infinite,
+    Fixed,
+    Some(usize)
 }
 
 impl LexDiscriminantRule {
@@ -346,6 +352,57 @@ impl LexDiscriminantRule {
                     result
                 }, stat)
             }
+            Count(r, min, max) => {
+                let (matcher, stat) = r.to_matcher();
+                let mut require_min = quote! {};
+                for _ in 0..*min {
+                    require_min = quote! {
+                        #require_min
+                        if let Some(len) = {#matcher} {
+                            start += len;
+                        } else {
+                            break None;
+                        }
+                    }
+                }
+                let stopper = match max {
+                    CountRuleMax::Some(max) => quote! {
+                        if matches < #max {
+                            if let Some(len) = {#matcher} {
+                                start += len;
+                            } else {
+                                break Some(start - old_start);
+                            }
+                        } else {
+                            break Some(start - old_start);
+                        }
+                        matches += 1;
+                    },
+                    CountRuleMax::Fixed => quote! {
+                        break Some(start - old_start);
+                    },
+                    CountRuleMax::Infinite => quote! {
+                        if let Some(len) = {#matcher} {
+                            start += len;
+                        } else {
+                            break Some(start - old_start);
+                        }
+                        matches += 1;
+                    }
+                };
+                (quote! {
+                    let old_start = start;
+                    let result = loop {
+                        #require_min
+                        let mut matches = #min;
+                        break loop {
+                            #stopper
+                        }
+                    };
+                    start = old_start;
+                    result
+                }, stat)
+            }
             Question(r) => {
                 let (matcher, stat) = r.to_matcher();
                 (quote! {
@@ -372,6 +429,10 @@ impl LexDiscriminantRule {
 fn gen_matchers(s: String) -> Result<(TokenStream2, TokenStream2), LexerPatternParseError> {
     let rule = parse_rule(s)?;
     Ok(rule.to_matcher())
+}
+
+lazy_static::lazy_static! {
+    static ref COUNT_PARSER: regex::Regex = regex::Regex::new(r"\{(\d+),?(\d+)?\}").unwrap();
 }
 
 fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerPatternParseError> {
@@ -436,6 +497,69 @@ fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerPatternParseError> 
                 if j != s.len() {
                     result.push(LexDiscriminantRule::Class(s[i..j+1].to_string()));
                     i = j;
+                }
+            }
+            '(' => {
+                let mut j = i + 1;
+                let mut class_depth = 0;
+                let mut group_depth = 1;
+                while j < s.len() {
+                    match chars[j] {
+                        '(' => group_depth += 1,
+                        ')' if class_depth == 0 => {
+                            group_depth -= 1;
+                            if group_depth == 0 {
+                                break;
+                            }
+                        }
+                        '[' if chars[j-1] != '\\' || class_depth == 0 => class_depth += 1,
+                        ']' if chars[j-1] != '\\' => class_depth -= 1,
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                if j != s.len() {
+                    result.push(parse_rule(s[i..j].to_string())?);
+                    i = j;
+                }
+            }
+            '{' => {
+                match result.pop() {
+                    Some(prev) => {
+                        let mut j = i + 1;
+                        while j < s.len() {
+                            match chars[j] {
+                                '}' => break,
+                                _ => j += 1
+                            }
+                        }
+                        if j != s.len() {
+                            let captures = COUNT_PARSER.captures(&s[i..j + 1]);
+                            match captures {
+                                Some(cap) => {
+                                    result.push(
+                                        LexDiscriminantRule::Count(
+                                            Box::new(prev),
+                                            cap[1].parse().unwrap(),
+                                            match cap.get(2) {
+                                                Some(s) => CountRuleMax::Some(s.as_str().parse().unwrap()),
+                                                None => {
+                                                    if s[i..j+1].contains(',') {
+                                                        CountRuleMax::Infinite
+                                                    } else {
+                                                        CountRuleMax::Fixed
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    );
+                                }
+                                None => return Err(LexerPatternParseError(Box::new(s), "invalid counter operator".to_string()))
+                            }
+                            i = j;
+                        }
+                    }
+                    None => return Err(LexerPatternParseError(Box::new(s), "{} was applied to nothing".to_string()))
                 }
             }
             c if c.is_alphabetic() => {
