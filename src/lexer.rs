@@ -55,7 +55,16 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
                 }
             },
             fragment: has_attr("frag", &variant.attrs),
-            skip: has_attr("skip", &variant.attrs),
+            skip: {
+                let skip = get_attr_mut("skip", &mut variant.attrs);
+                if let Some(attr) = skip {
+                    attr.path.segments.first_mut().unwrap().ident = format_ident!("allow");
+                    attr.tokens = quote! {(dead_code)};
+                    true
+                } else {
+                    false
+                }
+            },
             set_mode: match get_ident_list("set_mode", &variant.attrs) {
                 Some(mut list) => {
                     if list.len() != 1 {
@@ -146,6 +155,7 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
 
     Ok(quote! {
         #[derive(parce_macros::RemoveLexerAttributes, Debug, Eq, PartialEq, Copy, Clone, Hash)]
+        #[allow(dead_code)]
         #input
 
         #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -228,6 +238,17 @@ fn has_attr(s: &str, attrs: &Vec<Attribute>) -> bool {
 }
 
 fn get_attr<'a>(s: &str, attrs: &'a Vec<Attribute>) -> Option<&'a Attribute> {
+    for attr in attrs {
+        if let Some(ident) = attr.path.get_ident() {
+            if ident.to_string() == s {
+                return Some(attr);
+            }
+        }
+    }
+    None
+}
+
+fn get_attr_mut<'a>(s: &str, attrs: &'a mut Vec<Attribute>) -> Option<&'a mut Attribute> {
     for attr in attrs {
         if let Some(ident) = attr.path.get_ident() {
             if ident.to_string() == s {
@@ -448,7 +469,16 @@ impl LexDiscriminantRule {
                         }
                     }
                     RangeRuleMax::Fixed => quote! {},
-                    RangeRuleMax::Infinite => match_infinite(matcher),
+                    RangeRuleMax::Infinite => {
+                        let infinite = match_infinite(matcher);
+                        quote! {
+                            if !results.is_empty() {
+                                start += results[0];
+                                let mut i = 0;
+                                #infinite
+                            }
+                        }
+                    },
                 };
                 (quote! {
                     let old_start = start;
@@ -520,21 +550,29 @@ fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerMacroError> {
     let mut i = 0;
     let mut in_string = false;
     let mut group_depth = 0;
+    let mut class_depth = 0;
     let mut splits = vec![-1_i32];
     while i < s.len() {
         match chars[i] {
-            '(' | '[' if !in_string => group_depth += 1,
-            ')' | ']' if !in_string => group_depth -= 1,
-            '\'' if !in_string || chars[i-1] != '\\' => in_string = !in_string,
-            '|' if !in_string && group_depth == 0 => splits.push(i as i32),
+            '(' if !in_string && class_depth == 0 => group_depth += 1,
+            ')' if !in_string && class_depth == 0 => group_depth -= 1,
+            '[' if !in_string && (i == 0 || chars[i-1] != '\\' || class_depth == 0) => class_depth += 1,
+            ']' if !in_string && chars[i-1] != '\\' => class_depth -= 1,
+            '\'' if (!in_string && class_depth == 0) || (in_string && chars[i-1] != '\\') => {
+                in_string = !in_string;
+            }
+            '|' if !in_string && class_depth == 0 && group_depth == 0 => {
+                splits.push(i as i32);
+            }
             _ => {}
         }
         i += 1;
     }
     if splits.len() > 1 {
+        splits.push(s.len() as i32);
         let mut options = vec![];
         for j in 0..splits.len()-1 {
-            options.push(parse_rule(s[splits[j+1] as usize..splits[j+1] as usize].to_string())?);
+            options.push(parse_rule(s[(splits[j]+1) as usize..splits[j+1] as usize].to_string())?);
         }
         return Ok(LexDiscriminantRule::Or(options));
     }
@@ -579,26 +617,32 @@ fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerMacroError> {
             }
             '(' => {
                 let mut j = i + 1;
-                let mut class_depth = 0;
-                let mut group_depth = 1;
+                let mut class_depth: u32 = 0;
+                let mut group_depth: u32 = 1;
+                let mut in_string = false;
                 while j < s.len() {
                     match chars[j] {
-                        '(' => group_depth += 1,
-                        ')' if class_depth == 0 => {
+                        '(' if !in_string && class_depth == 0 => group_depth += 1,
+                        ')' if !in_string && class_depth == 0 => {
                             group_depth -= 1;
                             if group_depth == 0 {
                                 break;
                             }
                         }
-                        '[' if chars[j-1] != '\\' || class_depth == 0 => class_depth += 1,
-                        ']' if chars[j-1] != '\\' => class_depth -= 1,
+                        '[' if !in_string && (chars[j-1] != '\\' || class_depth == 0) => class_depth += 1,
+                        ']' if !in_string && chars[j-1] != '\\' => class_depth -= 1,
+                        '\'' if (!in_string && class_depth == 0) || (in_string && chars[j-1] != '\\') => {
+                            in_string = !in_string;
+                        }
                         _ => {}
                     }
                     j += 1;
                 }
                 if j != s.len() {
-                    result.push(parse_rule(s[i..j].to_string())?);
+                    result.push(parse_rule(s[i+1..j].to_string())?);
                     i = j;
+                } else {
+                    return Err(LexerMacroError(Box::new(s), "reached end of string before () group was closed".to_string()));
                 }
             }
             '{' => {
