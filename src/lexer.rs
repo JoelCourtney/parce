@@ -39,7 +39,7 @@ impl std::fmt::Display for LexerError {
             &short[..self.start - if start != 0 {start - 3} else {0}],
             &short[(self.start - if start != 0 {start - 3} else {0})..].red(),
             " ".repeat(7 + self.start - if start != 0 {start - 3} else {0}),
-            "^".red().bold(),
+            "^".red(),
         )
     }
 }
@@ -60,16 +60,33 @@ mod tests {
 
     /// Shorthand to make testing easier
     macro_rules! lexemes {
-        ($lexemes:ident; $($lexeme:ident $start:literal $len:literal),+) => {
-            vec![
+        ($($lexeme:ident $start:literal $len:literal),+) => {
+            Ok(vec![
                 $(
                     Lexeme {
-                        data: $lexemes::$lexeme,
+                        data: $lexeme,
                         start: $start,
                         len: $len
                     }
                 ),+
-            ]
+            ])
+        }
+    }
+
+    macro_rules! lexer_error {
+        ($input:literal $start:literal) => {
+            Err(LexerError {
+                input: $input.to_string(),
+                start: $start,
+                mode: "Default".to_string()
+            })
+        };
+        ($input:literal $start:literal $mode:literal) => {
+            Err(LexerError {
+                input: $input.to_string(),
+                start: $start,
+                mode: $mode.to_string()
+            })
         }
     }
 
@@ -86,21 +103,14 @@ mod tests {
 
     #[test]
     fn basic_pass() {
-        assert_eq!(LiteralLexer::default().lex("ab"), Ok(lexemes![
-            LiteralLexeme;
-            A 0 1, B 1 1
-        ]));
+        use LiteralLexeme::*;
+
+        assert_eq!(LiteralLexer::default().lex("ab"), lexemes![A 0 1, B 1 1]);
     }
 
     #[test]
     fn basic_fail() {
-        assert_eq!(LiteralLexer::default().lex("a b"), Err(
-            LexerError {
-                input: "a b".to_string(),
-                start: 1,
-                mode: "Default".to_string()
-            }
-        ))
+        assert_eq!(LiteralLexer::default().lex("a b"), lexer_error!("a b" 1));
     }
 
     /////// OPERATORS
@@ -111,7 +121,9 @@ mod tests {
         BPlus = "'b'+",
         CStar = "'c'*",
         DQuestion = "'d'?",
-        ERange = "'e'{2,4}"
+        ERange = "'e'{2,4}",
+        FExact = "'f'{2}",
+        GMin = "'g'{2,}"
     }
 
     #[test]
@@ -121,60 +133,45 @@ mod tests {
 
     #[test]
     fn plus() {
-        assert_eq!(OperatorLexer::default().lex("bbbabb"), Ok(lexemes![
-            OperatorLexeme;
-            BPlus 0 3, A 3 1, BPlus 4 2
-        ]));
+        use OperatorLexeme::*;
+
+        assert_eq!(OperatorLexer::default().lex("bbbabb"), lexemes![BPlus 0 3, A 3 1, BPlus 4 2]);
     }
 
     #[test]
     fn star() {
-        assert_eq!(OperatorLexer::default().lex("cccacc"), Ok(lexemes![
-            OperatorLexeme;
-            CStar 0 3, A 3 1, CStar 4 2
-        ]));
+        use OperatorLexeme::*;
+
+        assert_eq!(OperatorLexer::default().lex("cccacc"), lexemes![CStar 0 3, A 3 1, CStar 4 2]);
     }
 
     #[test]
     fn question() {
-        assert_eq!(OperatorLexer::default().lex("a"), Ok(lexemes![
-            OperatorLexeme;
-            A 0 1
-        ]));
-        assert_eq!(OperatorLexer::default().lex("d"), Ok(lexemes![
-            OperatorLexeme;
-            DQuestion 0 1
-        ]));
-        assert_eq!(OperatorLexer::default().lex("dd"), Ok(lexemes![
-            OperatorLexeme;
-            DQuestion 0 1, DQuestion 1 1
-        ]));
+        use OperatorLexeme::*;
+
+        assert_eq!(OperatorLexer::default().lex("a"), lexemes![A 0 1]);
+        assert_eq!(OperatorLexer::default().lex("d"), lexemes![DQuestion 0 1]);
+        assert_eq!(OperatorLexer::default().lex("dd"), lexemes![DQuestion 0 1, DQuestion 1 1]);
     }
 
     #[test]
     fn range() {
-        assert_eq!(OperatorLexer::default().lex("e"), Err(LexerError {
-            input: "e".to_string(),
-            start: 0,
-            mode: "Default".to_string()
-        }));
-        assert_eq!(OperatorLexer::default().lex("ee"), Ok(lexemes![
-            OperatorLexeme;
-            ERange 0 2
-        ]));
-        assert_eq!(OperatorLexer::default().lex("eee"), Ok(lexemes![
-            OperatorLexeme;
-            ERange 0 3
-        ]));
-        assert_eq!(OperatorLexer::default().lex("eeee"), Ok(lexemes![
-            OperatorLexeme;
-            ERange 0 4
-        ]));
-        assert_eq!(OperatorLexer::default().lex("eeeee"), Err(LexerError {
-            input: "eeeee".to_string(),
-            start: 4,
-            mode: "Default".to_string()
-        }));
+        use OperatorLexeme::*;
+
+        assert_eq!(OperatorLexer::default().lex("e"), lexer_error!("e" 0));
+        assert_eq!(OperatorLexer::default().lex("ee"), lexemes![ERange 0 2]);
+        assert_eq!(OperatorLexer::default().lex("eee"), lexemes![ERange 0 3]);
+        assert_eq!(OperatorLexer::default().lex("eeee"), lexemes![ERange 0 4]);
+        assert_eq!(OperatorLexer::default().lex("eeeee"), lexer_error!("eeeee" 4));
+
+        assert_eq!(OperatorLexer::default().lex("f"), lexer_error!("f" 0));
+        assert_eq!(OperatorLexer::default().lex("ff"), lexemes![FExact 0 2]);
+        assert_eq!(OperatorLexer::default().lex("fff"), lexer_error!("fff" 2));
+
+        assert_eq!(OperatorLexer::default().lex("g"), lexer_error!("g" 0));
+        assert_eq!(OperatorLexer::default().lex("gg"), lexemes![GMin 0 2]);
+        assert_eq!(OperatorLexer::default().lex("ggg"), lexemes![GMin 0 3]);
+        assert_eq!(OperatorLexer::default().lex("gggg"), lexemes![GMin 0 4]);
     }
 
     /////// NESTING & SEQUENCES
@@ -188,22 +185,12 @@ mod tests {
 
     #[test]
     fn nest_and_sequence() {
-        assert_eq!(NestingLexer::default().lex("bab"), Ok(lexemes![
-            NestingLexeme;
-            Nest 0 3
-        ]));
-        assert_eq!(NestingLexer::default().lex("ababbaba"), Ok(lexemes![
-            NestingLexeme;
-            DoubleNest 0 8
-        ]));
-        assert_eq!(NestingLexer::default().lex("aa"), Ok(lexemes![
-            NestingLexeme;
-            DoubleNest 0 2
-        ]));
-        assert_eq!(NestingLexer::default().lex("a"), Ok(lexemes![
-            NestingLexeme;
-            A 0 1
-        ]));
+        use NestingLexeme::*;
+
+        assert_eq!(NestingLexer::default().lex("bab"), lexemes![Nest 0 3]);
+        assert_eq!(NestingLexer::default().lex("ababbaba"), lexemes![DoubleNest 0 8]);
+        assert_eq!(NestingLexer::default().lex("aa"), lexemes![DoubleNest 0 2]);
+        assert_eq!(NestingLexer::default().lex("a"), lexemes![A 0 1]);
     }
 
     /////// PRIORITY & DOTS
@@ -211,38 +198,137 @@ mod tests {
     #[lexer(DotLexer)]
     enum DotLexeme {
         A = "'a'",
-        Dot = "."
+        Dot = ".",
+        Junk = "'c' .* 'c'"
     }
 
     #[test]
     fn priority_and_dot() {
-        assert_eq!(DotLexer::default().lex("ab"), Ok(lexemes![
-            DotLexeme;
-            A 0 1, Dot 1 1
-        ]))
+        use DotLexeme::*;
+
+        assert_eq!(DotLexer::default().lex("ab"), lexemes![A 0 1, Dot 1 1]);
+        assert_eq!(DotLexer::default().lex("cxcvbxc"), lexemes![Junk 0 7]);
     }
 
-    /////// GREEDYNESS
+    /////// CLASSES
+
+    #[lexer(ClassLexer)]
+    enum ClassLexeme {
+        AB = "[ab]",
+        Number = "[0-9]+",
+        String = r#" '"' [^"\n\r]* '"' "#
+    }
+
+    #[test]
+    fn class() {
+        use ClassLexeme::*;
+
+        assert_eq!(ClassLexer::default().lex("a"), lexemes![AB 0 1]);
+        assert_eq!(ClassLexer::default().lex("b"), lexemes![AB 0 1]);
+        assert_eq!(ClassLexer::default().lex("c"), lexer_error!("c" 0));
+
+        assert_eq!(ClassLexer::default().lex("1105"), lexemes![Number 0 4]);
+
+        assert_eq!(ClassLexer::default().lex(r#""Hello World!""#), lexemes![String 0 14]);
+        assert_eq!(ClassLexer::default().lex(r#""Unclosed"#), lexer_error!(r#""Unclosed"# 0));
+        assert_eq!(ClassLexer::default().lex(r#""Extra" "#), lexer_error!(r#""Extra" "# 7));
+    }
+
+    /////// GREEDINESS
 
     #[lexer(GreedyLexer)]
     enum GreedyLexeme {
-        A = "'a' .* 'b'"
+        A = "'a' .* 'b'",
+        One = "'c' [de]*",
+        Two = "'e' 'd' 'e' 'f'*",
+        Both = "One Two"
     }
 
     #[test]
     fn greedy() {
-        assert_eq!(GreedyLexer::default().lex("abbb"), Ok(lexemes![
-            GreedyLexeme;
-            A 0 4
-        ]));
-        let re = regex::Regex::new("a.*b").unwrap();
-        assert!(re.is_match("abbb"));
+        use GreedyLexeme::*;
+
+        assert_eq!(GreedyLexer::default().lex("abbb"), lexemes![A 0 4]);
+        assert_eq!(GreedyLexer::default().lex("cddedefff"), lexemes![Both 0 9]);
     }
 
     /////// OR & GROUPS
-    /////// DOTS
-    /////// CLASSES
+
+    #[lexer(OrLexer)]
+    enum OrLexeme {
+        AB = "'a' | 'b'",
+        Group = "'c' ( AB | 'd' )+ 'c'"
+    }
+
+    #[test]
+    fn or() {
+        use OrLexeme::*;
+
+        assert_eq!(OrLexer::default().lex("a"), lexemes![AB 0 1]);
+        assert_eq!(OrLexer::default().lex("b"), lexemes![AB 0 1]);
+        assert_eq!(OrLexer::default().lex("c"), lexer_error!("c" 0));
+
+        assert_eq!(OrLexer::default().lex("cabdbdabdabdc"), lexemes![Group 0 13])
+    }
+
     /////// SKIPS
+
+    #[lexer(SkipLexer)]
+    enum SkipLexeme {
+        #[skip] WhiteSpace = "[ \n\r\t]",
+        A = "'a'",
+        B = "'b'"
+    }
+
+    #[test]
+    fn skip() {
+        use SkipLexeme::*;
+
+        assert_eq!(SkipLexer::default().lex(" a\nb "), lexemes![A 1 1, B 3 1]);
+    }
+
     /////// FRAGMENTS
+
+    #[lexer(FragmentLexer)]
+    enum FragmentLexeme {
+        #[frag] A = "'a'",
+        AA = "A A"
+    }
+
+    #[test]
+    fn fragment() {
+        use FragmentLexeme::*;
+
+        assert_eq!(FragmentLexer::default().lex("aa"), lexemes![AA 0 2]);
+        assert_eq!(FragmentLexer::default().lex("a"), lexer_error!["a" 0]);
+    }
+
     /////// MODES
+
+    #[lexer(ModalLexer)]
+    #[modes(One, Two)]
+    enum ModalLexeme {
+        A = "'a'",
+        #[set_mode(Two)] B = "'b'",
+
+        #[mode(Two)]
+
+        C = "'c'",
+        #[set_mode(One)] D = "'d'",
+
+        #[mode(One, Two)]
+        E = "'e'"
+    }
+
+    #[test]
+    fn change_mode() {
+        use ModalLexeme::*;
+
+        assert_eq!(ModalLexer::default().lex("aeabcecda"), lexemes![
+            A 0 1, E 1 1, A 2 1, B 3 1, C 4 1, E 5 1, C 6 1, D 7 1, A 8 1
+        ]);
+        assert_eq!(ModalLexer::default().lex("d"), lexer_error!["d" 0 "One"]);
+
+        assert_eq!(ModalLexer::Two.lex("d"), lexemes![D 0 1]);
+    }
 }
