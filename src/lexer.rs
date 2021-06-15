@@ -4,67 +4,72 @@ use quote::{quote, format_ident, ToTokens};
 use proc_macro2::Ident;
 use inflector::Inflector;
 use check_keyword::CheckKeyword;
+use std::collections::HashMap;
 
-pub struct LexerPatternParseError(pub Box<dyn ToTokens>, pub String);
+pub struct LexerMacroError(pub Box<dyn ToTokens>, pub String);
 
 #[derive(Debug)]
 struct VariantInfo {
-    mode: String,
+    modes: Vec<String>,
     ident: Ident,
     pattern: String,
     fragment: bool,
     skip: bool,
-    set_mode: Option<String>,
+    set_mode: Option<String>
 }
 
-pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream2, LexerPatternParseError> {
-    let mut modes = vec![String::from("default")];
+pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream2, LexerMacroError> {
+
+    let modes = if let Some(idents) = get_ident_list("modes", &input.attrs) {
+        if idents.len() < 2 {
+            return Err(LexerMacroError(Box::new(input.clone()),"specify at least two modes, or delete the attribute for single-mode".to_string()))
+        }
+        idents
+    } else {
+        vec![String::from("Default")]
+    };
+
     let mut variant_info = vec![];
+    let mut current_modes = vec![modes.first().unwrap().clone()];
     for variant in &mut input.variants {
-        let mut info = VariantInfo {
-            mode: "".to_string(),
+        let info = VariantInfo {
+            modes: match get_ident_list("mode", &variant.attrs) {
+                Some(m) => {
+                    current_modes = m.clone();
+                    for mode in &m {
+                        if !modes.contains(mode) {
+                            return Err(LexerMacroError(Box::new(variant.clone()), format!("mode {} was not declared", mode)));
+                        }
+                    }
+                    m
+                }
+                None => current_modes.clone()
+            },
             ident: variant.ident.clone(),
             pattern: match &variant.discriminant {
                 Some((_, syn::Expr::Lit(syn::ExprLit {
                     lit: syn::Lit::Str(lit_str), ..
                 }))) => lit_str.value(),
                 _ => {
-                    return Err(LexerPatternParseError(Box::new(variant.clone()), "discriminant must a str literal".to_string()));
+                    return Err(LexerMacroError(Box::new(variant.clone()), "discriminant must a str literal".to_string()));
                 }
             },
             fragment: has_attr("frag", &variant.attrs),
             skip: has_attr("skip", &variant.attrs),
-            set_mode: match get_attr("set_mode", &variant.attrs) {
-                Some(attr) => {
-                    let meta = attr.parse_meta().unwrap();
-                    match meta {
-                        syn::Meta::NameValue(syn::MetaNameValue {lit: syn::Lit::Str(lit_str), ..}) => {
-                            Some(lit_str.value())
-                        }
-                        _ => {
-                            return Err(LexerPatternParseError(Box::new(attr.clone()), "set_mode must be of the form $[set_mode = \"mode_name\"]".to_string()));
-                        }
+            set_mode: match get_ident_list("set_mode", &variant.attrs) {
+                Some(mut list) => {
+                    if list.len() != 1 {
+                        return Err(LexerMacroError(Box::new(variant.clone()), "set_mode must have exactly one mode".to_string()));
                     }
+                    let result = list.pop().unwrap();
+                    if !modes.contains(&result) {
+                        return Err(LexerMacroError(Box::new(variant.clone()), format!("mode {} was not declared", result)));
+                    }
+                    Some(result)
                 }
                 None => None
             }
         };
-        match get_attr("new_mode", &variant.attrs) {
-            Some(attr) => {
-                let meta = attr.parse_meta().unwrap();
-                match meta {
-                    syn::Meta::NameValue(syn::MetaNameValue {lit: syn::Lit::Str(lit_str), ..}) => {
-                        modes.push(lit_str.value())
-                    }
-                    _ => {
-                        // emit_error!(attr, "must be of the form #[new_mode = \"mode_name\"]")
-                        return Err(LexerPatternParseError(Box::new(attr.clone()), "new_mode must be of the form #[new_mode = \"mode_name\"]".to_string()));
-                    }
-                }
-            }
-            None => {}
-        }
-        info.mode = modes.last().unwrap().clone();
         variant_info.push(info);
         variant.discriminant = None;
     }
@@ -74,8 +79,12 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
 
     let mut pattern_matchers = vec![];
     let mut statics: Vec<TokenStream2> = vec![];
-    let mut non_fragment_checks = vec![];
     let mut no_skip = vec![];
+    let mut mode_setters = vec![];
+    let mut mode_checks = HashMap::<String, TokenStream2>::new();
+    for mode in &modes {
+        mode_checks.insert(mode.clone(), quote! {});
+    }
     for info in &variant_info {
         let lexeme_ident = info.ident.clone();
         let fn_ident = format_ident!("{}", info.ident.to_string().to_snake_case().into_safe());
@@ -87,35 +96,53 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
         };
         pattern_matchers.push(
             quote! {
-                fn #fn_ident(s: &str, mut start: usize) -> Option<usize> {
+                fn #fn_ident(s: &str, mut start: usize) -> Vec<usize> {
                     #matcher
                 }
-
             }
         );
         statics.push(stat);
         if !info.fragment {
-            non_fragment_checks.push(
-                quote! {
-                    match #fn_ident(s, start) {
-                        Some(len) => {
-                            match longest {
-                                Some((lexeme, longest_len)) if longest_len < len => {
-                                    longest = Some((#ident::#lexeme_ident, len))
-                                }
-                                None => longest = Some((#ident::#lexeme_ident, len)),
-                                _ => {}
+            for mode in &info.modes {
+                let acc = mode_checks[mode].clone();
+                mode_checks.insert(mode.clone(), quote! {
+                    #acc
+                    for length in #fn_ident(s, start) {
+                        match longest {
+                            Some((lexeme, longest_len)) if longest_len < length => {
+                                longest = Some((#ident::#lexeme_ident, length))
                             }
+                            None => longest = Some((#ident::#lexeme_ident, length)),
+                            _ => {}
                         }
-                        _ => {}
                     }
-                }
-            )
+                });
+            }
         }
         if !info.skip {
             no_skip.push(quote! {#ident::#lexeme_ident});
         }
+        if let Some(mode) = &info.set_mode {
+            let mode_ident = format_ident!("{}", mode);
+            mode_setters.push(
+                quote! {
+                    #ident::#lexeme_ident => *self = #lexer_ident::#mode_ident,
+                }
+            )
+        }
     }
+
+    let mut non_fragment_checks = vec![];
+    for (key, value) in mode_checks {
+        let mode_ident = format_ident!("{}", key);
+        non_fragment_checks.push(quote! {
+            #lexer_ident::#mode_ident => {
+                #value
+            }
+        });
+    }
+
+    let default_mode = format_ident!("{}", modes.first().unwrap().clone());
 
     Ok(quote! {
         #[derive(parce_macros::RemoveLexerAttributes, Debug, Eq, PartialEq, Copy, Clone, Hash)]
@@ -128,7 +155,7 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
 
         impl Default for #lexer_ident {
             fn default() -> Self {
-                #lexer_ident::Default
+                #lexer_ident::#default_mode
             }
         }
 
@@ -154,7 +181,9 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
                 while start < s.len() {
                     let mut longest: Option<(#ident, usize)> = None;
 
-                    #(#non_fragment_checks)*
+                    match self {
+                        #(#non_fragment_checks)*
+                    }
 
                     match longest {
                         Some((data, len)) if len > 0 => {
@@ -168,12 +197,16 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
                                 ),
                                 _ => {}
                             }
+                            match data {
+                                #(#mode_setters)*
+                                _ => {}
+                            }
                             start += len;
                         }
                         _ => return Err(LexerError {
-                            full: s.to_string(),
+                            input: s.to_string(),
                             start,
-                            mode: "default".to_string()
+                            mode: self.to_string()
                         })
                     }
                 }
@@ -205,6 +238,28 @@ fn get_attr<'a>(s: &str, attrs: &'a Vec<Attribute>) -> Option<&'a Attribute> {
     None
 }
 
+fn get_ident_list(s: &str, attrs: &Vec<Attribute>) -> Option<Vec<String>> {
+    let attr = get_attr(s, attrs)?;
+    match attr.parse_meta() {
+        Ok(syn::Meta::List(syn::MetaList {nested,..})) => {
+            let mut list = vec![];
+            for nest in nested {
+                match nest {
+                    syn::NestedMeta::Meta(syn::Meta::Path(path)) => {
+                        match path.get_ident() {
+                            Some(id) => list.push(id.to_string()),
+                            _ => return None
+                        }
+                    }
+                    _ => return None
+                }
+            }
+            Some(list)
+        },
+        _ => return None
+    }
+}
+
 #[derive(Clone, Debug, Hash)]
 enum LexDiscriminantRule {
     And(Vec<LexDiscriminantRule>),
@@ -216,11 +271,11 @@ enum LexDiscriminantRule {
     Star(Box<LexDiscriminantRule>),
     Plus(Box<LexDiscriminantRule>),
     Question(Box<LexDiscriminantRule>),
-    Count(Box<LexDiscriminantRule>, usize, CountRuleMax)
+    Range(Box<LexDiscriminantRule>, usize, RangeRuleMax)
 }
 
 #[derive(Clone, Debug, Hash)]
-enum CountRuleMax {
+enum RangeRuleMax {
     Infinite,
     Fixed,
     Some(usize)
@@ -246,9 +301,9 @@ impl LexDiscriminantRule {
                 let len = s.len();
                 (quote! {
                     if s.len() >= start+#len && &s[start..start+#len] == #s {
-                        Some(#len)
+                        vec![#len]
                     } else {
-                        None
+                        vec![]
                     }
                 }, quote! {})
             }
@@ -266,21 +321,30 @@ impl LexDiscriminantRule {
                     matchers.push(m);
                     statics.push(s);
                 }
+
+                // pay attention now
+                let mut brute_force_it = quote! {
+                    results.push(start - old_start);
+                };
+                for matcher in matchers.iter().rev() {
+                    brute_force_it = quote! {
+                        let lengths = {#matcher};
+                        let old_start_2 = start;
+                        for length in lengths {
+                            start += length;
+                            {#brute_force_it}
+                            start = old_start_2;
+                        }
+                    }
+                }
                 (quote! {
                     let old_start = start;
-                    let result = loop {
-                        #(
-                            match {#matchers} {
-                                Some(len) => start += len,
-                                None => {
-                                    break None;
-                                }
-                            }
-                        )*
-                        break Some(start - old_start);
-                    };
+                    let mut results = vec![];
+                    {#brute_force_it}
+                    results.sort_unstable();
+                    results.dedup();
                     start = old_start;
-                    result
+                    results
                 }, quote! { #(#statics)* })
             }
             Or(v) => {
@@ -292,14 +356,13 @@ impl LexDiscriminantRule {
                     statics.push(s);
                 }
                 (quote! {
-                    let mut lengths = vec![];
+                    let mut results = vec![];
                     #(
-                        match {#matchers} {
-                            Some(l) => lengths.push(l),
-                            None => {}
-                        }
+                        results.extend({#matchers});
                     )*
-                    lengths.max()
+                    results.sort_unstable();
+                    results.dedup();
+                    results
                 }, quote! { #(#statics)* })
             }
             Class(s) => {
@@ -309,12 +372,12 @@ impl LexDiscriminantRule {
                 let mut hasher = DefaultHasher::new();
                 s.hash(&mut hasher);
 
-                let static_ident = format_ident!("class_static_{}", hasher.finish());
+                let static_ident = format_ident!("CLASS_STATIC_{}", hasher.finish());
                 (quote! {
                     if s.len() > start && #static_ident.is_match(&s[start..start+1]) {
-                        Some(1)
+                        vec![1]
                     } else {
-                        None
+                        vec![]
                     }
                 }, quote! {
                     static ref #static_ident: regex::Regex = regex::Regex::new(#s)
@@ -323,102 +386,96 @@ impl LexDiscriminantRule {
             }
             Star(r) => {
                 let (matcher, stat) = r.to_matcher();
+                let infinite = match_infinite(matcher);
                 (quote! {
                     let old_start = start;
-                    while let Some(len) = {#matcher} {
-                        start += len;
-                    }
-                    let diff = start - old_start;
+                    let mut results = vec![0];
+                    let mut i = 0;
+                    #infinite;
                     start = old_start;
-                    Some(diff)
+                    results
                 }, stat)
             }
             Plus(r) => {
                 let (matcher, stat) = r.to_matcher();
+                let infinite = match_infinite(matcher);
                 (quote! {
                     let old_start = start;
-                    let result = loop {
-                        if let Some(len) = {#matcher} {
-                            start += len;
-                        } else {
-                            break None;
-                        }
-                        while let Some(len) = {#matcher} {
-                            start += len;
-                        }
-                        break Some(start - old_start)
-                    };
+                    let mut results = vec![];
+                    let mut i: i32 = -1;
+                    #infinite
                     start = old_start;
-                    result
+                    results
                 }, stat)
             }
-            Count(r, min, max) => {
+            Range(r, min, max) => {
                 let (matcher, stat) = r.to_matcher();
-                let mut require_min = quote! {};
+                let mut require_min = quote! {results.push(start - old_start)};
                 for _ in 0..*min {
                     require_min = quote! {
-                        #require_min
-                        if let Some(len) = {#matcher} {
-                            start += len;
-                        } else {
-                            break None;
+                        let lengths = {#matcher};
+                        for length in lengths {
+                            let old_start_2 = start;
+                            start += length;
+                            {#require_min}
+                            start = old_start_2;
                         }
                     }
                 }
-                let stopper = match max {
-                    CountRuleMax::Some(max) => quote! {
-                        if matches < #max {
-                            if let Some(len) = {#matcher} {
-                                start += len;
-                            } else {
-                                break Some(start - old_start);
+                let rest = match max {
+                    RangeRuleMax::Some(max) => {
+                        let mut allow_max = quote! {};
+                        for _ in 0..(*max-*min) {
+                            allow_max = quote! {
+                                let lengths = {#matcher};
+                                for length in lengths {
+                                    let old_start_2 = start;
+                                    start += length;
+                                    results.push(start - old_start);
+                                    {#allow_max}
+                                    start = old_start_2;
+                                }
                             }
-                        } else {
-                            break Some(start - old_start);
                         }
-                        matches += 1;
-                    },
-                    CountRuleMax::Fixed => quote! {
-                        break Some(start - old_start);
-                    },
-                    CountRuleMax::Infinite => quote! {
-                        if let Some(len) = {#matcher} {
-                            start += len;
-                        } else {
-                            break Some(start - old_start);
+                        quote! {
+                            let results_length = results.len();
+                            for i in 0..results_length {
+                                start = old_start + results[i];
+                                #allow_max
+                            }
+                            results.sort_unstable();
+                            results.dedup();
                         }
-                        matches += 1;
                     }
+                    RangeRuleMax::Fixed => quote! {},
+                    RangeRuleMax::Infinite => match_infinite(matcher),
                 };
                 (quote! {
                     let old_start = start;
-                    let result = loop {
-                        #require_min
-                        let mut matches = #min;
-                        break loop {
-                            #stopper
-                        }
-                    };
+                    let mut results = vec![];
+                    #require_min
+                    results.sort_unstable();
+                    results.dedup();
+                    #rest
                     start = old_start;
-                    result
+                    results
                 }, stat)
             }
             Question(r) => {
                 let (matcher, stat) = r.to_matcher();
                 (quote! {
-                    if let Some(len) = {#matcher} {
-                        Some(len)
-                    } else {
-                        None
-                    }
+                    let mut lengths = {#matcher};
+                    lengths.insert(0, 0);
+                    lengths.dedup();
+                    lengths
                 }, stat)
             }
             Dot => {
                 (quote! {
                     if s.len() > start {
-                        Some(1)
+                        vec![1]
                     } else {
-                        None
+                        vec![]
                     }
                 }, quote! {})
             }
@@ -426,7 +483,28 @@ impl LexDiscriminantRule {
     }
 }
 
-fn gen_matchers(s: String) -> Result<(TokenStream2, TokenStream2), LexerPatternParseError> {
+fn match_infinite(matcher: TokenStream2) -> TokenStream2 {
+    quote! {
+        loop {
+            let mut lengths = {#matcher};
+            if !lengths.is_empty() {
+                for length in &mut lengths {
+                    *length += start - old_start;
+                }
+                results.extend(lengths);
+                &results[(i+1) as usize ..].sort_unstable();
+                results.dedup();
+            }
+            i += 1;
+            if i as usize == results.len() {
+                break;
+            }
+            start = old_start + results[i as usize];
+        }
+    }
+}
+
+fn gen_matchers(s: String) -> Result<(TokenStream2, TokenStream2), LexerMacroError> {
     let rule = parse_rule(s)?;
     Ok(rule.to_matcher())
 }
@@ -435,7 +513,7 @@ lazy_static::lazy_static! {
     static ref COUNT_PARSER: regex::Regex = regex::Regex::new(r"\{(\d+),?(\d+)?\}").unwrap();
 }
 
-fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerPatternParseError> {
+fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerMacroError> {
     let chars: Vec<char> = s.chars().collect();
 
     // Search for |
@@ -475,7 +553,7 @@ fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerPatternParseError> 
                     result.push(LexDiscriminantRule::Literal(s[i+1..j].to_string()));
                     i = j;
                 } else {
-                    return Err(LexerPatternParseError(Box::new(s), "reached end of pattern before string was closed".to_string()));
+                    return Err(LexerMacroError(Box::new(s), "reached end of pattern before string was closed".to_string()));
                 }
             }
             '[' => {
@@ -538,28 +616,28 @@ fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerPatternParseError> 
                             match captures {
                                 Some(cap) => {
                                     result.push(
-                                        LexDiscriminantRule::Count(
+                                        LexDiscriminantRule::Range(
                                             Box::new(prev),
                                             cap[1].parse().unwrap(),
                                             match cap.get(2) {
-                                                Some(s) => CountRuleMax::Some(s.as_str().parse().unwrap()),
+                                                Some(s) => RangeRuleMax::Some(s.as_str().parse().unwrap()),
                                                 None => {
                                                     if s[i..j+1].contains(',') {
-                                                        CountRuleMax::Infinite
+                                                        RangeRuleMax::Infinite
                                                     } else {
-                                                        CountRuleMax::Fixed
+                                                        RangeRuleMax::Fixed
                                                     }
                                                 }
                                             }
                                         )
                                     );
                                 }
-                                None => return Err(LexerPatternParseError(Box::new(s), "invalid counter operator".to_string()))
+                                None => return Err(LexerMacroError(Box::new(s), "invalid counter operator".to_string()))
                             }
                             i = j;
                         }
                     }
-                    None => return Err(LexerPatternParseError(Box::new(s), "{} was applied to nothing".to_string()))
+                    None => return Err(LexerMacroError(Box::new(s), "{} was applied to nothing".to_string()))
                 }
             }
             c if c.is_alphabetic() => {
@@ -573,23 +651,23 @@ fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerPatternParseError> 
             '.' => result.push(LexDiscriminantRule::Dot),
             '*' => match result.pop() {
                 Some(l) => result.push(LexDiscriminantRule::Star(Box::new(l))),
-                None => return Err(LexerPatternParseError(Box::new(s), "* was applied to nothing".to_string()))
+                None => return Err(LexerMacroError(Box::new(s), "* was applied to nothing".to_string()))
             },
             '+' => match result.pop() {
                 Some(l) => result.push(LexDiscriminantRule::Plus(Box::new(l))),
-                None => return Err(LexerPatternParseError(Box::new(s), "+ was applied to nothing".to_string()))
+                None => return Err(LexerMacroError(Box::new(s), "+ was applied to nothing".to_string()))
             },
             '?' => match result.pop() {
                 Some(l) => result.push(LexDiscriminantRule::Question(Box::new(l))),
-                None => return Err(LexerPatternParseError(Box::new(s), "? was applied to nothing".to_string()))
+                None => return Err(LexerMacroError(Box::new(s), "? was applied to nothing".to_string()))
             },
             c if c.is_whitespace() => {}
-            c => return Err(LexerPatternParseError(Box::new(s), format!("{} is not a valid beginning to any lexer pattern", c)))
+            c => return Err(LexerMacroError(Box::new(s), format!("{} is not a valid beginning to any lexer pattern", c)))
         }
         i += 1;
     }
     if result.len() == 0 {
-        Err(LexerPatternParseError(Box::new(s), "this shouldn't be possible".to_string()))
+        Err(LexerMacroError(Box::new(s), "this shouldn't be possible".to_string()))
     } else if result.len() == 1 {
         Ok(result.remove(0))
     } else {

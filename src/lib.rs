@@ -2,7 +2,7 @@ use proc_macro::{TokenStream};
 use syn::parse_macro_input;
 use proc_macro_error::{proc_macro_error, abort};
 use quote::quote;
-use crate::lexer::LexerPatternParseError;
+use crate::lexer::LexerMacroError;
 
 mod lexer;
 
@@ -22,11 +22,11 @@ pub fn lexer(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as syn::ItemEnum);
     match lexer::lexer(lexer_ident, input.clone()) {
         Ok(s) => s.into(),
-        Err(LexerPatternParseError(who, message)) => abort!(who, message)
+        Err(LexerMacroError(who, message)) => abort!(who, message)
     }
 }
 
-#[proc_macro_derive(RemoveLexerAttributes, attributes(skip, frag, set_mode, new_mode))]
+#[proc_macro_derive(RemoveLexerAttributes, attributes(skip, frag, set_mode, mode, modes))]
 pub fn lex_attributes(_input: TokenStream) -> TokenStream {
     (quote! {}).into()
 }
