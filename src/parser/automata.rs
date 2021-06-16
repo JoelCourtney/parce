@@ -28,6 +28,12 @@ impl<'a> From<*mut Automaton<'a>> for Rawtomaton<'a> {
     }
 }
 
+impl<'a> From<&mut Automaton<'a>> for Rawtomaton<'a> {
+    fn from(a: &mut Automaton<'a>) -> Self {
+        Rawtomaton(a)
+    }
+}
+
 impl Automaton<'_> {
     fn new<'a>(rule: Rule, production: u32) -> Automaton<'a> {
         Automaton {
@@ -57,14 +63,24 @@ pub enum AutomatonCommand {
     /// Start a new automaton with this as its parent
     Recruit(Rule, u32),
 
+    RecruitDie(Rule, u32),
+
     /// Increase state by one
     Advance,
 
     /// Wake copies of parents, increase their state by 1, add this as their child
     Victory,
 
+    VictoryDie,
+
     /// time to die :)
     Die
+}
+
+impl Default for AutomatonCommand {
+    fn default() -> AutomatonCommand {
+        AutomatonCommand::Die
+    }
 }
 
 #[derive(Shrinkwrap)]
@@ -75,20 +91,20 @@ impl<'a> Army<'a> {
         Army(Arena::with_capacity(10))
     }
 
-    pub unsafe fn act(&'a self, auto: *mut Automaton<'a>, actions: Vec<AutomatonCommand>) -> (Vec<*mut Automaton>, bool, bool) {
+    pub unsafe fn act(&'a self, auto: Rawtomaton<'a>, actions: TinyVec<[AutomatonCommand; 4]>) -> (TinyVec<[Rawtomaton; 4]>, bool, bool) {
         use AutomatonCommand::*;
 
-        let mut new_recruits: Vec<*mut Automaton> = vec![];
+        let mut new_recruits: TinyVec<[Rawtomaton; 4]> = tiny_vec![];
 
         let mut victory = false;
         let mut remove = false;
 
-        let mut clone: Option<*mut Automaton> = None;
+        let mut clone: Option<Rawtomaton> = None;
         let mut get_clone = move || unsafe {
             if let Some(c) = clone {
                 c
             } else {
-                let c = self.alloc((*auto).clone()) as *mut Automaton;
+                let c = self.alloc((**auto).clone()).into();
                 clone = Some(c);
                 c
             }
@@ -98,24 +114,45 @@ impl<'a> Army<'a> {
             match action {
                 Recruit(rule, prod) => {
                     let new = self.recruit(rule, prod);
-                    (*new).parents.push(get_clone().into());
+                    (**new).parents.push(get_clone().into());
                     new_recruits.push(new);
                 }
+                RecruitDie(rule, prod) => {
+                    let new = self.recruit(rule, prod);
+                    (**new).parents.push(auto);
+                    new_recruits.push(new);
+                    remove = true;
+                }
                 Victory => {
-                    let parents: Vec<*mut Automaton> = (*auto).parents.iter().map(
-                        |p| self.alloc((***p).clone()) as *mut Automaton
+                    let parents: TinyVec<[Rawtomaton; 4]> = (**auto).parents.iter().map(
+                        |p| self.alloc((***p).clone()).into()
                     ).collect();
                     if parents.len() == 0 {
                         victory = true;
                     } else {
                         for parent in &parents {
-                            (**parent).state += 1;
-                            (**parent).children.push(get_clone().into());
+                            (***parent).state += 1;
+                            (***parent).children.push(get_clone().into());
                         }
                         new_recruits.extend(parents);
                     }
                 }
-                Advance => (*auto).state += 1,
+                VictoryDie => {
+                    let parents: TinyVec<[Rawtomaton; 4]> = (**auto).parents.iter().map(
+                        |p| self.alloc((***p).clone()).into()
+                    ).collect();
+                    if parents.len() == 0 {
+                        victory = true;
+                    } else {
+                        for parent in &parents {
+                            (***parent).state += 1;
+                            (***parent).children.push(auto);
+                        }
+                        new_recruits.extend(parents);
+                    }
+                    remove = true;
+                }
+                Advance => (**auto).state += 1,
                 Die => {
                     remove = true;
                 }
@@ -125,8 +162,8 @@ impl<'a> Army<'a> {
         (new_recruits, victory, remove)
     }
 
-    pub fn recruit(&'a self, rule: Rule, prod: u32) -> *mut Automaton {
-        self.alloc(Automaton::new(rule, prod))
+    pub fn recruit(&'a self, rule: Rule, prod: u32) -> Rawtomaton {
+        self.alloc(Automaton::new(rule, prod)).into()
     }
 }
 

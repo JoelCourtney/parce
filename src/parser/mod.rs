@@ -3,6 +3,7 @@ mod automata;
 use crate::lexer::{Lexeme, Lexer};
 use core::any::TypeId as Rule;
 use automata::*;
+use tinyvec::TinyVec;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ParserError;
@@ -16,17 +17,17 @@ pub trait Parser {
 
     fn default_lexer() -> Box<dyn Lexer<Lexemes = Self::Lexemes>>;
     fn starting_productions() -> u32;
-    fn command(rule: Rule, production: u32, state: u32, lexeme: Lexeme<Self::Lexemes>) -> Vec<AutomatonCommand>;
+    fn command(rule: Rule, production: u32, state: u32, lexeme: Lexeme<Self::Lexemes>) -> TinyVec<[AutomatonCommand; 4]>;
     fn assemble(auto: *mut Automaton) -> Self where Self: Sized;
 }
 
 impl<L: Copy + Eq, C: 'static + Sized + Parser<Lexemes = L>> Parse<&Vec<Lexeme<L>>, C> for C {
     fn parse(lexemes: &Vec<Lexeme<L>>) -> Result<Self, ParserError> {
         let army: Army = Army::new();
-        let mut alive: Vec<*mut Automaton>= vec![];
+        let mut alive: Vec<Rawtomaton>= vec![];
 
         for i in 0..Self::starting_productions() {
-            alive.push(army.recruit(Rule::of::<C>(), i));
+            alive.push(army.recruit(Rule::of::<C>(), i).into());
         }
 
         let mut last = None;
@@ -38,7 +39,7 @@ impl<L: Copy + Eq, C: 'static + Sized + Parser<Lexemes = L>> Parse<&Vec<Lexeme<L
                 j -= 1;
                 let auto = alive[j];
                 unsafe {
-                    let actions = Self::command((*auto).rule, (*auto).production, (*auto).state, lexemes[i]);
+                    let actions = Self::command((**auto).rule, (**auto).production, (**auto).state, lexemes[i]);
                     let (new, victory, remove) = army.act(auto, actions);
                     alive.extend(new);
                     if victory {
@@ -53,7 +54,7 @@ impl<L: Copy + Eq, C: 'static + Sized + Parser<Lexemes = L>> Parse<&Vec<Lexeme<L
         }
 
         if let Some(l) = last {
-            Ok(Self::assemble(l))
+            Ok(Self::assemble(*l))
         } else {
             Err(ParserError)
         }
@@ -74,6 +75,7 @@ mod tests {
     use super::*;
     use crate::prelude::*;
     use crate as parce;
+    use tinyvec::{TinyVec, tiny_vec};
 
     #[lexer(MyLexer)]
     enum MyLexeme {
@@ -123,7 +125,7 @@ mod tests {
             Box::new(MyLexer::default())
         }
         fn starting_productions() -> u32 { 1 }
-        fn command(rule: Rule, production: u32, state: u32, lexeme: Lexeme<MyLexeme>) -> Vec<AutomatonCommand> {
+        fn command(rule: Rule, production: u32, state: u32, lexeme: Lexeme<MyLexeme>) -> TinyVec<[AutomatonCommand; 4]> {
             use AutomatonCommand::*;
 
             if rule == Rule::of::<MyGrammar>() {
@@ -131,18 +133,18 @@ mod tests {
                     0 => {
                         match state {
                             0 => if lexeme == MyLexeme::A {
-                                vec![
+                                tiny_vec!(
+                                    [AutomatonCommand; 4] =>
                                     Recruit(Rule::of::<MyGrammar>(), 1),
-                                    Recruit(Rule::of::<MyGrammar>(), 2),
-                                    Die
-                                ]
+                                    RecruitDie(Rule::of::<MyGrammar>(), 2)
+                                )
                             } else {
-                                vec![Die]
+                                tiny_vec!([AutomatonCommand; 4] => Die)
                             }
                             1 => if lexeme == MyLexeme::A {
-                                vec![Victory, Die]
+                                tiny_vec!([AutomatonCommand; 4] => VictoryDie)
                             } else {
-                                vec![Die]
+                                tiny_vec!([AutomatonCommand; 4] => Die)
                             }
                             _ => panic!("only two states")
                         }
@@ -150,9 +152,9 @@ mod tests {
                     1 => {
                         match state {
                             0 => if lexeme == MyLexeme::B {
-                                vec![Victory, Die]
+                                tiny_vec!([AutomatonCommand; 4] => VictoryDie)
                             } else {
-                                vec![Die]
+                                tiny_vec!([AutomatonCommand; 4] => Die)
                             }
                             _ => panic!("only 1 state")
                         }
@@ -160,14 +162,14 @@ mod tests {
                     2 => {
                         match state {
                             0 => if lexeme == MyLexeme::B {
-                                vec![Advance]
+                                tiny_vec!([AutomatonCommand; 4] => Advance)
                             } else {
-                                vec![Die]
+                                tiny_vec!([AutomatonCommand; 4] => Die)
                             }
                             1 => if lexeme == MyLexeme::B {
-                                vec![Victory, Die]
+                                tiny_vec!([AutomatonCommand; 4] => VictoryDie)
                             } else {
-                                vec![Die]
+                                tiny_vec!([AutomatonCommand; 4] => Die)
                             }
                             _ => panic!("only 2 states")
                         }
