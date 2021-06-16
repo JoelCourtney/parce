@@ -1,6 +1,6 @@
 use std::fmt::Formatter;
 
-pub trait Lexer<T: Copy>: std::fmt::Display + std::fmt::Debug {
+pub trait Lexer<T: Copy + Eq>: std::fmt::Display + std::fmt::Debug {
     fn lex(&mut self, s: &str) -> Result<Vec<Lexeme<T>>, LexerError> where Self: Sized;
 }
 
@@ -49,10 +49,18 @@ impl std::error::Error for LexerError {
 }
 
 #[derive(Debug, Default, Eq, PartialEq, Copy, Clone, Hash)]
-pub struct Lexeme<T: Copy> {
+pub struct Lexeme<T: Copy + Eq> {
     pub data: T,
     pub start: usize,
     pub len: usize
+}
+
+/// Can only implement Lexeme<T> == T, because trying to implement T == Lexeme<T> violates
+/// orphan rules. When comparing a wrapped Lexeme to its internal type, put the lexeme first.
+impl<T: Copy + Eq> PartialEq<T> for Lexeme<T> {
+    fn eq(&self, other: &T) -> bool {
+        self.data == *other
+    }
 }
 
 #[cfg(test)]
