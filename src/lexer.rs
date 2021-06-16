@@ -177,7 +177,9 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
             }
         }
 
-        impl parce::prelude::Lexer<#ident> for #lexer_ident {
+        impl parce::prelude::Lexer for #lexer_ident {
+            type Lexemes = #ident;
+
             fn lex(&mut self, s: &str) -> Result<Vec<parce::prelude::Lexeme<#ident>>, parce::prelude::LexerError> {
                 use parce::prelude::{Lexeme, LexerError};
 
