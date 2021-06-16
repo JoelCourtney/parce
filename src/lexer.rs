@@ -1,7 +1,9 @@
 use std::fmt::Formatter;
 
-pub trait Lexer<T: Copy + Eq>: std::fmt::Display + std::fmt::Debug {
-    fn lex(&mut self, s: &str) -> Result<Vec<Lexeme<T>>, LexerError> where Self: Sized;
+pub trait Lexer: std::fmt::Display + std::fmt::Debug {
+    type Lexemes: Eq + Copy;
+
+    fn lex(&mut self, s: &str) -> Result<Vec<Lexeme<Self::Lexemes>>, LexerError>;
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
