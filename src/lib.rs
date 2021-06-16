@@ -5,6 +5,7 @@ use quote::quote;
 use crate::lexer::LexerMacroError;
 
 mod lexer;
+mod parser;
 
 #[proc_macro_error]
 #[proc_macro_attribute]
@@ -24,6 +25,12 @@ pub fn lexer(args: TokenStream, input: TokenStream) -> TokenStream {
         Ok(s) => s.into(),
         Err(LexerMacroError(who, message)) => abort!(who, message)
     }
+}
+
+#[proc_macro_error]
+#[proc_macro_attribute]
+pub fn parser(_args: TokenStream, input: TokenStream) -> TokenStream {
+    input
 }
 
 #[proc_macro_derive(RemoveLexerAttributes, attributes(skip, frag, set_mode, mode, modes))]
