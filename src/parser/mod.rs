@@ -1,52 +1,58 @@
-mod automata;
+pub mod automata;
 
 use crate::lexer::{Lexeme, Lexer};
 use core::any::TypeId as Rule;
 use automata::*;
-use tinyvec::TinyVec;
+use tinyvec::ArrayVec;
+use std::collections::VecDeque;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ParserError;
 
-pub trait Parse<I, O: Sized> {
-    fn parse(input: I) -> Result<O, ParserError>;
+pub trait Parse<I>: Sized  {
+    fn parse(input: I) -> Result<Self, ParserError>;
 }
 
 pub trait Parser {
     type Lexemes: Copy + Eq;
+    const PRODUCTIONS: u32;
 
     fn default_lexer() -> Box<dyn Lexer<Lexemes = Self::Lexemes>>;
-    fn starting_productions() -> u32;
-    fn command(rule: Rule, production: u32, state: u32, lexeme: Lexeme<Self::Lexemes>) -> TinyVec<[AutomatonCommand; 4]>;
+    fn commands(rule: Rule, route: u32, state: u32, lexeme: Lexeme<Self::Lexemes>) -> ArrayVec<[AutomatonCommand; 2]>;
     fn assemble(auto: *mut Automaton) -> Self where Self: Sized;
 }
 
-impl<L: Copy + Eq, C: 'static + Sized + Parser<Lexemes = L>> Parse<&Vec<Lexeme<L>>, C> for C {
+impl<L: Copy + Eq, C: 'static + Sized + Parser<Lexemes = L>> Parse<&Vec<Lexeme<L>>> for C {
     fn parse(lexemes: &Vec<Lexeme<L>>) -> Result<Self, ParserError> {
         let army: Army = Army::new();
-        let mut alive: Vec<Rawtomaton>= vec![];
+        let mut alive: VecDeque<Rawtomaton> = VecDeque::new();
 
-        for i in 0..Self::starting_productions() {
-            alive.push(army.recruit(Rule::of::<C>(), i).into());
+        for i in 0..Self::PRODUCTIONS {
+            alive.push_back(army.recruit(Rule::of::<C>(), i).into());
         }
 
         let mut last = None;
 
         let mut i = 0;
         while !alive.is_empty() {
-            let mut j = alive.len();
-            while j > 0 {
-                j -= 1;
+            let mut j = 0;
+            while j < alive.len() {
                 let auto = alive[j];
                 unsafe {
-                    let actions = Self::command((**auto).rule, (**auto).production, (**auto).state, lexemes[i]);
-                    let (new, victory, remove) = army.act(auto, actions);
-                    alive.extend(new);
-                    if victory {
-                        last = Some(auto);
+                    let commands = Self::commands((**auto).rule, (**auto).route, (**auto).state, lexemes[i]);
+                    let result = army.command(auto, commands);
+                    alive.extend(result.new_recruits);
+                    j += result.reactivated.len();
+                    for old in result.reactivated {
+                        alive.push_front(old);
                     }
-                    if remove {
+                    if let Some(vic) = result.victorious {
+                        last = Some(vic);
+                    }
+                    if result.remove {
                         alive.remove(j);
+                    } else {
+                        j += 1;
                     }
                 }
             }
@@ -61,7 +67,7 @@ impl<L: Copy + Eq, C: 'static + Sized + Parser<Lexemes = L>> Parse<&Vec<Lexeme<L
     }
 }
 
-impl<C: 'static + Sized + Parser> Parse<&str, C> for C {
+impl<C: 'static + Sized + Parser> Parse<&str> for C {
     fn parse(input: &str) -> Result<Self, ParserError> {
         match Self::default_lexer().lex(input) {
             Ok(lexemes) => Self::parse(&lexemes),
@@ -73,25 +79,29 @@ impl<C: 'static + Sized + Parser> Parse<&str, C> for C {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::*;
+    use crate::reexports::*;
     use crate as parce;
-    use tinyvec::{TinyVec, tiny_vec};
 
-    #[lexer(MyLexer)]
+    #[crate::lexer(MyLexer)]
     enum MyLexeme {
         A = "'a'",
         B = "'b'"
     }
 
-    #[derive(Debug, Eq, PartialEq)]
+    #[crate::parser(MyLexer)]
     enum MyGrammar {
-        Thing // "A (B | B B) A
+        Thing = "A (B | B B) A"
     }
+
+    // #[parser(HellOLexer)]
+    // enum Hello {
+    //     One = " #Thing C* "
+    // }
 
     #[test]
     fn parse() {
-        let now = std::time::Instant::now();
-        for _ in 0..10000 {
+        // let now = std::time::Instant::now();
+        // for _ in 0..10000 {
             assert_eq!(MyGrammar::parse(&vec![
                 Lexeme {
                     data: MyLexeme::A,
@@ -114,75 +124,77 @@ mod tests {
                     len: 1
                 },
             ]), Ok(MyGrammar::Thing));
-        }
-        println!("{}", now.elapsed().as_micros());
+        // }
+        // println!("{}", now.elapsed().as_micros());
     }
 
-    impl Parser for MyGrammar {
-        type Lexemes = MyLexeme;
-
-        fn default_lexer() -> Box<dyn Lexer<Lexemes = MyLexeme>> {
-            Box::new(MyLexer::default())
-        }
-        fn starting_productions() -> u32 { 1 }
-        fn command(rule: Rule, production: u32, state: u32, lexeme: Lexeme<MyLexeme>) -> TinyVec<[AutomatonCommand; 4]> {
-            use AutomatonCommand::*;
-
-            if rule == Rule::of::<MyGrammar>() {
-                match production {
-                    0 => {
-                        match state {
-                            0 => if lexeme == MyLexeme::A {
-                                tiny_vec!(
-                                    [AutomatonCommand; 4] =>
-                                    Recruit(Rule::of::<MyGrammar>(), 1),
-                                    RecruitDie(Rule::of::<MyGrammar>(), 2)
-                                )
-                            } else {
-                                tiny_vec!([AutomatonCommand; 4] => Die)
-                            }
-                            1 => if lexeme == MyLexeme::A {
-                                tiny_vec!([AutomatonCommand; 4] => VictoryDie)
-                            } else {
-                                tiny_vec!([AutomatonCommand; 4] => Die)
-                            }
-                            _ => panic!("only two states")
-                        }
-                    }
-                    1 => {
-                        match state {
-                            0 => if lexeme == MyLexeme::B {
-                                tiny_vec!([AutomatonCommand; 4] => VictoryDie)
-                            } else {
-                                tiny_vec!([AutomatonCommand; 4] => Die)
-                            }
-                            _ => panic!("only 1 state")
-                        }
-                    }
-                    2 => {
-                        match state {
-                            0 => if lexeme == MyLexeme::B {
-                                tiny_vec!([AutomatonCommand; 4] => Advance)
-                            } else {
-                                tiny_vec!([AutomatonCommand; 4] => Die)
-                            }
-                            1 => if lexeme == MyLexeme::B {
-                                tiny_vec!([AutomatonCommand; 4] => VictoryDie)
-                            } else {
-                                tiny_vec!([AutomatonCommand; 4] => Die)
-                            }
-                            _ => panic!("only 2 states")
-                        }
-                    }
-                    _ => panic!("only 3 productions")
-                }
-            } else {
-                panic!("only one rule")
-            }
-        }
-
-        fn assemble(_auto: *mut Automaton) -> Self {
-            Self::Thing
-        }
-    }
+    // impl Parser for MyGrammar {
+    //     type Lexemes = <MyLexer as Lexer>::Lexemes;
+    //     const PRODUCTIONS: u32 = 1;
+    //
+    //     fn default_lexer() -> Box<dyn Lexer<Lexemes = <MyLexer as Lexer>::Lexemes>> {
+    //         Box::new(MyLexer::default())
+    //     }
+    //     fn commands(rule: Rule, route: u32, state: u32, lexeme: Lexeme<<MyLexer as Lexer>::Lexemes>) -> ArrayVec<[AutomatonCommand; 2]> {
+    //         use AutomatonCommand::*;
+    //
+    //         // println!("");
+    //         // dbg!((route, state, lexeme));
+    //
+    //         let result = if rule == Rule::of::<MyGrammar>() {
+    //             match route {
+    //                 0 => {
+    //                     match state {
+    //                         0 => if lexeme == <MyLexer as Lexer>::Lexemes::A {
+    //                             array_vec!([AutomatonCommand;2] => Advance)
+    //                         } else {
+    //                             array_vec!([AutomatonCommand;2] => Die)
+    //                         }
+    //                         1 => array_vec!([AutomatonCommand;2] => Recruit {
+    //                             rule: Rule::of::<MyGrammar>(),
+    //                             route: 1,
+    //                             how_many: 2,
+    //                             on_victory: Continuation::Advance
+    //                         }, Die),
+    //                         2 => if lexeme == <MyLexer as Lexer>::Lexemes::A {
+    //                             array_vec!([AutomatonCommand;2] => Victory, Die)
+    //                         } else {
+    //                             array_vec!([AutomatonCommand;2] => Die)
+    //                         }
+    //                         _ => panic!("only three states")
+    //                     }
+    //                 }
+    //                 1 => {
+    //                     match state {
+    //                         0 => if lexeme == <MyLexer as Lexer>::Lexemes::B {
+    //                             array_vec!([AutomatonCommand;2] => Victory, Die)
+    //                         } else {
+    //                             array_vec!([AutomatonCommand;2] => Die)
+    //                         }
+    //                         _ => panic!("only 1 state")
+    //                     }
+    //                 }
+    //                 2 => {
+    //                     match state {
+    //                         0 => if lexeme == <MyLexer as Lexer>::Lexemes::B {
+    //                             array_vec!([AutomatonCommand;2] => Advance)
+    //                         } else {
+    //                             array_vec!([AutomatonCommand;2] => Die)
+    //                         }
+    //                         1 => array_vec!([AutomatonCommand;2] => Victory, Die),
+    //                         _ => panic!("only 2 states")
+    //                     }
+    //                 }
+    //                 _ => panic!("only 3 routes")
+    //             }
+    //         } else {
+    //             panic!("only one rule")
+    //         };
+    //         result
+    //     }
+    //
+    //     fn assemble(_auto: *mut Automaton) -> Self {
+    //         Self::Thing
+    //     }
+    // }
 }

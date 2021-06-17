@@ -16,7 +16,7 @@
 //! macro.
 //!
 //! ```
-//! use parce::prelude::*;
+//! use parce::*;
 //!
 //! #[lexer(MyLexer)]
 //! enum MyLexemes {
@@ -69,6 +69,10 @@
 //! - ANTLR has more features.
 //!     - Mixed lexer/parse grammars.
 //!     - (there are others, but I don't know what they are off the top of my head.)
-pub mod prelude;
+
+pub mod reexports;
 pub mod lexer;
 pub mod parser;
+
+pub use parce_macros::{lexer, parser};
+pub use crate::lexer::Lexer;

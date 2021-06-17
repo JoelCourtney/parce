@@ -100,8 +100,9 @@ mod tests {
         }
     }
 
-    use crate::prelude::*;
+    use crate::*;
     use crate as parce;
+    use super::*;
 
     /////// LITERALS
 
