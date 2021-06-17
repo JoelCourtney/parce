@@ -1,53 +1,9 @@
-use std::fmt::Formatter;
+use crate::ParceError;
 
 pub trait Lexer: std::fmt::Display + std::fmt::Debug {
     type Lexemes: Eq + Copy;
 
-    fn lex(&mut self, s: &str) -> Result<Vec<Lexeme<Self::Lexemes>>, LexerError>;
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct LexerError {
-    pub input: String,
-    pub start: usize,
-    pub mode: String
-}
-
-impl std::fmt::Display for LexerError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        use colored::Colorize;
-
-        let start = self.start.saturating_sub(10);
-        let end = std::cmp::min(self.input.len(), self.start + 10);
-        let short = format!("{}{}{}",
-            if start != 0 {
-                "..."
-            } else {
-                ""
-            },
-            &self.input[start..end],
-            if end != self.input.len() {
-                "..."
-            } else {
-                ""
-            }
-        );
-
-        write!(
-            f,
-            "Lexer Error: {}\nLexer Mode: {}\nInput: {}{}\n{}{}",
-            "no possible lexemes matched this input".red(),
-            self.mode.bright_blue(),
-            &short[..self.start - if start != 0 {start - 3} else {0}],
-            &short[(self.start - if start != 0 {start - 3} else {0})..].red(),
-            " ".repeat(7 + self.start - if start != 0 {start - 3} else {0}),
-            "^".red(),
-        )
-    }
-}
-
-impl std::error::Error for LexerError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+    fn lex(&mut self, s: &str) -> Result<Vec<Lexeme<Self::Lexemes>>, ParceError>;
 }
 
 #[derive(Debug, Default, Eq, PartialEq, Copy, Clone, Hash)]
@@ -85,17 +41,17 @@ mod tests {
 
     macro_rules! lexer_error {
         ($input:literal $start:literal) => {
-            Err(LexerError {
+            Err(ParceError {
                 input: $input.to_string(),
                 start: $start,
-                mode: "Default".to_string()
+                phase: ParcePhase::Lexer("Default".to_string())
             })
         };
         ($input:literal $start:literal $mode:literal) => {
-            Err(LexerError {
+            Err(ParceError {
                 input: $input.to_string(),
                 start: $start,
-                mode: $mode.to_string()
+                phase: ParcePhase::Lexer($mode.to_string())
             })
         }
     }

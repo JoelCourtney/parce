@@ -72,8 +72,6 @@ pub enum AutomatonCommand {
 
     Victory,
 
-    Reset(u32),
-
     /// time to die :)
     Die
 }
@@ -86,9 +84,9 @@ impl Default for AutomatonCommand {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Continuation {
-    Advance,
-    Die,
-    Reset(u32)
+    PassDie,
+    PassAdvance,
+    Advance
 }
 
 #[derive(Shrinkwrap)]
@@ -127,7 +125,6 @@ impl<'a> Army<'a> {
 
         let mut result = CommandResult::default();
 
-        let mut die = actions.contains(&AutomatonCommand::Die);
         for action in actions {
             match action {
                 Advance => {
@@ -136,15 +133,13 @@ impl<'a> Army<'a> {
                 Die => {
                     result.remove = true;
                 }
-                Reset(n) => {
-                    (**auto).state = n;
-                }
                 Recruit {
                     rule,
                     route,
                     how_many,
                     on_victory
                 } => {
+                    let mut die = actions.contains(&AutomatonCommand::Die);
                     for i in 0..how_many {
                         let new = self.recruit(rule, route + i);
                         if die {
@@ -157,16 +152,18 @@ impl<'a> Army<'a> {
                     }
                 }
                 Victory => {
+                    let die = actions.contains(&AutomatonCommand::Die);
                     let mut auto = auto;
                     loop {
+                        (**auto).state += 1;
                         match (**auto).parent {
                             Some((parent, cont)) => {
+                                (**parent).state += 1;
                                 match cont {
-                                    Continuation::Die => {
+                                    Continuation::PassDie => {
                                         auto = parent;
                                     }
-                                    Continuation::Reset(n) => {
-                                        (**parent).state = n;
+                                    Continuation::PassAdvance => {
                                         if die {
                                             (**parent).children.push(auto);
                                         } else {
@@ -176,7 +173,6 @@ impl<'a> Army<'a> {
                                         auto = parent;
                                     }
                                     Continuation::Advance => {
-                                        (**parent).state += 1;
                                         if die {
                                             (**parent).children.push(auto);
                                         } else {

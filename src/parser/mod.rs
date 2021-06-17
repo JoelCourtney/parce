@@ -5,30 +5,31 @@ use core::any::TypeId as Rule;
 use automata::*;
 use tinyvec::ArrayVec;
 use std::collections::VecDeque;
+use crate::{ParceError, ParcePhase};
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct ParserError;
-
-pub trait Parse<I>: Sized  {
-    fn parse(input: I) -> Result<Self, ParserError>;
+pub trait Parce<O: Parser>: ToString  {
+    fn parce(&self) -> Result<O, ParceError>;
 }
 
-pub trait Parser {
+pub trait Parser: 'static + Sized {
     type Lexemes: Copy + Eq;
     const PRODUCTIONS: u32;
 
     fn default_lexer() -> Box<dyn Lexer<Lexemes = Self::Lexemes>>;
     fn commands(rule: Rule, route: u32, state: u32, lexeme: Lexeme<Self::Lexemes>) -> ArrayVec<[AutomatonCommand; 2]>;
-    fn assemble(auto: *mut Automaton) -> Self where Self: Sized;
+    fn assemble(auto: Rawtomaton, lexemes: &[Lexeme<Self::Lexemes>], text: &str) -> (usize, Self);
 }
 
-impl<L: Copy + Eq, C: 'static + Sized + Parser<Lexemes = L>> Parse<&Vec<Lexeme<L>>> for C {
-    fn parse(lexemes: &Vec<Lexeme<L>>) -> Result<Self, ParserError> {
+impl<I: ToString, O: Parser> Parce<O> for I {
+    fn parce(&self) -> Result<O, ParceError> {
+        let text = self.to_string();
+        let lexemes = O::default_lexer().lex(&text)?;
+
         let army: Army = Army::new();
         let mut alive: VecDeque<Rawtomaton> = VecDeque::new();
 
-        for i in 0..Self::PRODUCTIONS {
-            alive.push_back(army.recruit(Rule::of::<C>(), i).into());
+        for i in 0..O::PRODUCTIONS {
+            alive.push_back(army.recruit(Rule::of::<O>(), i).into());
         }
 
         let mut last = None;
@@ -39,7 +40,7 @@ impl<L: Copy + Eq, C: 'static + Sized + Parser<Lexemes = L>> Parse<&Vec<Lexeme<L
             while j < alive.len() {
                 let auto = alive[j];
                 unsafe {
-                    let commands = Self::commands((**auto).rule, (**auto).route, (**auto).state, lexemes[i]);
+                    let commands = O::commands((**auto).rule, (**auto).route, (**auto).state, lexemes[i]);
                     let result = army.command(auto, commands);
                     alive.extend(result.new_recruits);
                     j += result.reactivated.len();
@@ -60,35 +61,30 @@ impl<L: Copy + Eq, C: 'static + Sized + Parser<Lexemes = L>> Parse<&Vec<Lexeme<L
         }
 
         if let Some(l) = last {
-            Ok(Self::assemble(*l))
+            let (consumed, result) = O::assemble(l, lexemes.as_slice(), &text);
+            result
         } else {
-            Err(ParserError)
-        }
-    }
-}
-
-impl<C: 'static + Sized + Parser> Parse<&str> for C {
-    fn parse(input: &str) -> Result<Self, ParserError> {
-        match Self::default_lexer().lex(input) {
-            Ok(lexemes) => Self::parse(&lexemes),
-            Err(_) => Err(ParserError)
+            Err(ParceError {
+                input: text,
+                start: lexemes[i].start + lexemes[i].len,
+                phase: ParcePhase::Parse
+            })
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::reexports::*;
     use crate as parce;
+    use parce::*;
 
-    #[crate::lexer(MyLexer)]
+    #[lexer(MyLexer)]
     enum MyLexeme {
         A = "'a'",
         B = "'b'"
     }
 
-    #[crate::parser(MyLexer)]
+    #[parser(MyLexer)]
     enum MyGrammar {
         Thing = "A (B | B B) A"
     }
@@ -100,32 +96,12 @@ mod tests {
 
     #[test]
     fn parse() {
-        // let now = std::time::Instant::now();
-        // for _ in 0..10000 {
-            assert_eq!(MyGrammar::parse(&vec![
-                Lexeme {
-                    data: MyLexeme::A,
-                    start: 0,
-                    len: 1
-                },
-                Lexeme {
-                    data: MyLexeme::B,
-                    start: 1,
-                    len: 1
-                },
-                Lexeme {
-                    data: MyLexeme::B,
-                    start: 2,
-                    len: 1
-                },
-                Lexeme {
-                    data: MyLexeme::A,
-                    start: 3,
-                    len: 1
-                },
-            ]), Ok(MyGrammar::Thing));
-        // }
-        // println!("{}", now.elapsed().as_micros());
+        use crate::parser::Parce;
+        let now = std::time::Instant::now();
+        for _ in 0..1000 {
+            assert_eq!("abba".parce(), Ok(MyGrammar::Thing));
+        }
+        println!("{}", now.elapsed().as_micros());
     }
 
     // impl Parser for MyGrammar {
