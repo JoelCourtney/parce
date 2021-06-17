@@ -97,7 +97,7 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
         };
         pattern_matchers.push(
             quote! {
-                fn #fn_ident(s: &str, mut start: usize) -> Vec<usize> {
+                fn #fn_ident(s: &str, mut start: usize) -> TinyVec<[usize;2]> {
                     #matcher
                 }
             }
@@ -172,8 +172,20 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
         impl parce::reexports::Lexer for #lexer_ident {
             type Lexemes = #ident;
 
-            fn lex(&mut self, s: &str) -> Result<Vec<parce::reexports::Lexeme<#ident>>, parce::reexports::LexerError> {
+            fn lex(&mut self, s: &str) -> Result<Vec<parce::reexports::Lexeme<#ident>>, parce::ParceError> {
                 use parce::reexports::*;
+                use parce::{ParceError, ParcePhase};
+
+                fn dedup_tiny(tiny: &mut TinyVec<[usize; 2]>) {
+                    if let Some(mut i) = tiny.len().checked_sub(1) {
+                        while i > 0 {
+                            if tiny[i] == tiny[i - 1] {
+                                tiny.remove(i);
+                            }
+                            i -= 1;
+                        }
+                    }
+                }
 
                 #(#pattern_matchers)*
                 lazy_static! {
@@ -207,10 +219,10 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
                             }
                             start += len;
                         }
-                        _ => return Err(LexerError {
+                        _ => return Err(ParceError {
                             input: s.to_string(),
                             start,
-                            mode: self.to_string()
+                            phase: ParcePhase::Lexer(self.to_string())
                         })
                     }
                 }
@@ -219,8 +231,6 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
         }
     })
 }
-
-
 
 #[derive(Clone, Debug, Hash)]
 enum LexDiscriminantRule {
@@ -256,9 +266,9 @@ impl LexDiscriminantRule {
                 let len = s.len();
                 (quote! {
                     if s.len() >= start+#len && &s[start..start+#len] == #s {
-                        vec![#len]
+                        tiny_vec!([usize;2] => #len)
                     } else {
-                        vec![]
+                        tiny_vec!([usize;2])
                     }
                 }, quote! {})
             }
@@ -294,10 +304,10 @@ impl LexDiscriminantRule {
                 }
                 (quote! {
                     let old_start = start;
-                    let mut results = vec![];
+                    let mut results = tiny_vec!([usize;2]);
                     {#brute_force_it}
                     results.sort_unstable();
-                    results.dedup();
+                    dedup_tiny(&mut results);
                     start = old_start;
                     results
                 }, quote! { #(#statics)* })
@@ -311,12 +321,12 @@ impl LexDiscriminantRule {
                     statics.push(s);
                 }
                 (quote! {
-                    let mut results = vec![];
+                    let mut results = tiny_vec!([usize;2]);
                     #(
                         results.extend({#matchers});
                     )*
                     results.sort_unstable();
-                    results.dedup();
+                    dedup_tiny(&mut results);
                     results
                 }, quote! { #(#statics)* })
             }
@@ -330,9 +340,9 @@ impl LexDiscriminantRule {
                 let static_ident = format_ident!("CLASS_STATIC_{}", hasher.finish());
                 (quote! {
                     if s.len() > start && #static_ident.is_match(&s[start..start+1]) {
-                        vec![1]
+                        tiny_vec!([usize;2] => 1)
                     } else {
-                        vec![]
+                        tiny_vec!([usize;2])
                     }
                 }, quote! {
                     static ref #static_ident: regex::Regex = regex::Regex::new(#s)
@@ -344,7 +354,7 @@ impl LexDiscriminantRule {
                 let infinite = match_infinite(matcher);
                 (quote! {
                     let old_start = start;
-                    let mut results = vec![0];
+                    let mut results = tiny_vec!([usize;2] => 0);
                     let mut i = 0;
                     #infinite;
                     start = old_start;
@@ -356,7 +366,7 @@ impl LexDiscriminantRule {
                 let infinite = match_infinite(matcher);
                 (quote! {
                     let old_start = start;
-                    let mut results = vec![];
+                    let mut results = tiny_vec!([usize;2]);
                     let mut i: i32 = -1;
                     #infinite
                     start = old_start;
@@ -399,7 +409,7 @@ impl LexDiscriminantRule {
                                 #allow_max
                             }
                             results.sort_unstable();
-                            results.dedup();
+                            dedup_tiny(&mut results);
                         }
                     }
                     RangeRuleMax::Fixed => quote! {},
@@ -416,10 +426,10 @@ impl LexDiscriminantRule {
                 };
                 (quote! {
                     let old_start = start;
-                    let mut results = vec![];
+                    let mut results = tiny_vec!([usize;2]);
                     #require_min
                     results.sort_unstable();
-                    results.dedup();
+                    dedup_tiny(&mut results);
                     #rest
                     start = old_start;
                     results
@@ -428,18 +438,18 @@ impl LexDiscriminantRule {
             Question(r) => {
                 let (matcher, stat) = r.to_matcher();
                 (quote! {
-                    let mut lengths = {#matcher};
-                    lengths.insert(0, 0);
-                    lengths.dedup();
-                    lengths
+                    let mut results = {#matcher};
+                    results.insert(0, 0);
+                    dedup_tiny(&mut results);
+                    results
                 }, stat)
             }
             Dot => {
                 (quote! {
                     if s.len() > start {
-                        vec![1]
+                        tiny_vec!([usize;2] => 1)
                     } else {
-                        vec![]
+                        tiny_vec!([usize;2])
                     }
                 }, quote! {})
             }
@@ -457,7 +467,7 @@ fn match_infinite(matcher: TokenStream2) -> TokenStream2 {
                 }
                 results.extend(lengths);
                 &results[(i+1) as usize ..].sort_unstable();
-                results.dedup();
+                dedup_tiny(&mut results);
             }
             i += 1;
             if i as usize == results.len() {
