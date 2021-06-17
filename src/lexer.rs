@@ -1,12 +1,11 @@
 use proc_macro2::TokenStream as TokenStream2;
-use syn::Attribute;
-use quote::{quote, format_ident, ToTokens};
+use quote::{quote, format_ident};
 use proc_macro2::Ident;
 use inflector::Inflector;
 use check_keyword::CheckKeyword;
 use std::collections::HashMap;
+use crate::common::*;
 
-pub struct LexerMacroError(pub Box<dyn ToTokens>, pub String);
 
 #[derive(Debug)]
 struct VariantInfo {
@@ -18,11 +17,11 @@ struct VariantInfo {
     set_mode: Option<String>
 }
 
-pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream2, LexerMacroError> {
+pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream2, ParceMacroError> {
 
     let modes = if let Some(idents) = get_ident_list("modes", &input.attrs) {
         if idents.len() < 2 {
-            return Err(LexerMacroError(Box::new(input.clone()),"specify at least two modes, or delete the attribute for single-mode".to_string()))
+            return Err(ParceMacroError(Box::new(input.clone()),"specify at least two modes, or delete the attribute for single-mode".to_string()))
         }
         idents
     } else {
@@ -38,7 +37,7 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
                     current_modes = m.clone();
                     for mode in &m {
                         if !modes.contains(mode) {
-                            return Err(LexerMacroError(Box::new(variant.clone()), format!("mode {} was not declared", mode)));
+                            return Err(ParceMacroError(Box::new(variant.clone()), format!("mode {} was not declared", mode)));
                         }
                     }
                     m
@@ -46,14 +45,7 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
                 None => current_modes.clone()
             },
             ident: variant.ident.clone(),
-            pattern: match &variant.discriminant {
-                Some((_, syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(lit_str), ..
-                }))) => lit_str.value(),
-                _ => {
-                    return Err(LexerMacroError(Box::new(variant.clone()), "discriminant must a str literal".to_string()));
-                }
-            },
+            pattern: get_pattern(&variant)?,
             fragment: has_attr("frag", &variant.attrs),
             skip: {
                 let skip = get_attr_mut("skip", &mut variant.attrs);
@@ -68,11 +60,11 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
             set_mode: match get_ident_list("set_mode", &variant.attrs) {
                 Some(mut list) => {
                     if list.len() != 1 {
-                        return Err(LexerMacroError(Box::new(variant.clone()), "set_mode must have exactly one mode".to_string()));
+                        return Err(ParceMacroError(Box::new(variant.clone()), "set_mode must have exactly one mode".to_string()));
                     }
                     let result = list.pop().unwrap();
                     if !modes.contains(&result) {
-                        return Err(LexerMacroError(Box::new(variant.clone()), format!("mode {} was not declared", result)));
+                        return Err(ParceMacroError(Box::new(variant.clone()), format!("mode {} was not declared", result)));
                     }
                     Some(result)
                 }
@@ -177,11 +169,11 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
             }
         }
 
-        impl parce::prelude::Lexer for #lexer_ident {
+        impl parce::reexports::Lexer for #lexer_ident {
             type Lexemes = #ident;
 
-            fn lex(&mut self, s: &str) -> Result<Vec<parce::prelude::Lexeme<#ident>>, parce::prelude::LexerError> {
-                use parce::prelude::{Lexeme, LexerError};
+            fn lex(&mut self, s: &str) -> Result<Vec<parce::reexports::Lexeme<#ident>>, parce::reexports::LexerError> {
+                use parce::reexports::*;
 
                 #(#pattern_matchers)*
                 lazy_static! {
@@ -228,60 +220,7 @@ pub fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<TokenStream
     })
 }
 
-fn has_attr(s: &str, attrs: &Vec<Attribute>) -> bool {
-    for attr in attrs {
-        if let Some(ident) = attr.path.get_ident() {
-            if ident.to_string() == s {
-                return true;
-            }
-        }
-    }
-    false
-}
 
-fn get_attr<'a>(s: &str, attrs: &'a Vec<Attribute>) -> Option<&'a Attribute> {
-    for attr in attrs {
-        if let Some(ident) = attr.path.get_ident() {
-            if ident.to_string() == s {
-                return Some(attr);
-            }
-        }
-    }
-    None
-}
-
-fn get_attr_mut<'a>(s: &str, attrs: &'a mut Vec<Attribute>) -> Option<&'a mut Attribute> {
-    for attr in attrs {
-        if let Some(ident) = attr.path.get_ident() {
-            if ident.to_string() == s {
-                return Some(attr);
-            }
-        }
-    }
-    None
-}
-
-fn get_ident_list(s: &str, attrs: &Vec<Attribute>) -> Option<Vec<String>> {
-    let attr = get_attr(s, attrs)?;
-    match attr.parse_meta() {
-        Ok(syn::Meta::List(syn::MetaList {nested,..})) => {
-            let mut list = vec![];
-            for nest in nested {
-                match nest {
-                    syn::NestedMeta::Meta(syn::Meta::Path(path)) => {
-                        match path.get_ident() {
-                            Some(id) => list.push(id.to_string()),
-                            _ => return None
-                        }
-                    }
-                    _ => return None
-                }
-            }
-            Some(list)
-        },
-        _ => return None
-    }
-}
 
 #[derive(Clone, Debug, Hash)]
 enum LexDiscriminantRule {
@@ -295,13 +234,6 @@ enum LexDiscriminantRule {
     Plus(Box<LexDiscriminantRule>),
     Question(Box<LexDiscriminantRule>),
     Range(Box<LexDiscriminantRule>, usize, RangeRuleMax)
-}
-
-#[derive(Clone, Debug, Hash)]
-enum RangeRuleMax {
-    Infinite,
-    Fixed,
-    Some(usize)
 }
 
 impl LexDiscriminantRule {
@@ -536,16 +468,13 @@ fn match_infinite(matcher: TokenStream2) -> TokenStream2 {
     }
 }
 
-fn gen_matchers(s: String) -> Result<(TokenStream2, TokenStream2), LexerMacroError> {
+fn gen_matchers(s: String) -> Result<(TokenStream2, TokenStream2), ParceMacroError> {
     let rule = parse_rule(s)?;
     Ok(rule.to_matcher())
 }
 
-lazy_static::lazy_static! {
-    static ref COUNT_PARSER: regex::Regex = regex::Regex::new(r"\{(\d+),?(\d+)?\}").unwrap();
-}
 
-fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerMacroError> {
+fn parse_rule(s: String) -> Result<LexDiscriminantRule, ParceMacroError> {
     let chars: Vec<char> = s.chars().collect();
 
     // Search for |
@@ -593,7 +522,7 @@ fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerMacroError> {
                     result.push(LexDiscriminantRule::Literal(s[i+1..j].to_string()));
                     i = j;
                 } else {
-                    return Err(LexerMacroError(Box::new(s), "reached end of pattern before string was closed".to_string()));
+                    return Err(ParceMacroError(Box::new(s), "reached end of pattern before string was closed".to_string()));
                 }
             }
             '[' => {
@@ -644,7 +573,7 @@ fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerMacroError> {
                     result.push(parse_rule(s[i+1..j].to_string())?);
                     i = j;
                 } else {
-                    return Err(LexerMacroError(Box::new(s), "reached end of string before () group was closed".to_string()));
+                    return Err(ParceMacroError(Box::new(s), "reached end of string before () group was closed".to_string()));
                 }
             }
             '{' => {
@@ -678,12 +607,12 @@ fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerMacroError> {
                                         )
                                     );
                                 }
-                                None => return Err(LexerMacroError(Box::new(s), "invalid counter operator".to_string()))
+                                None => return Err(ParceMacroError(Box::new(s), "invalid counter operator".to_string()))
                             }
                             i = j;
                         }
                     }
-                    None => return Err(LexerMacroError(Box::new(s), "{} was applied to nothing".to_string()))
+                    None => return Err(ParceMacroError(Box::new(s), "{} was applied to nothing".to_string()))
                 }
             }
             c if c.is_alphabetic() => {
@@ -697,23 +626,23 @@ fn parse_rule(s: String) -> Result<LexDiscriminantRule, LexerMacroError> {
             '.' => result.push(LexDiscriminantRule::Dot),
             '*' => match result.pop() {
                 Some(l) => result.push(LexDiscriminantRule::Star(Box::new(l))),
-                None => return Err(LexerMacroError(Box::new(s), "* was applied to nothing".to_string()))
+                None => return Err(ParceMacroError(Box::new(s), "* was applied to nothing".to_string()))
             },
             '+' => match result.pop() {
                 Some(l) => result.push(LexDiscriminantRule::Plus(Box::new(l))),
-                None => return Err(LexerMacroError(Box::new(s), "+ was applied to nothing".to_string()))
+                None => return Err(ParceMacroError(Box::new(s), "+ was applied to nothing".to_string()))
             },
             '?' => match result.pop() {
                 Some(l) => result.push(LexDiscriminantRule::Question(Box::new(l))),
-                None => return Err(LexerMacroError(Box::new(s), "? was applied to nothing".to_string()))
+                None => return Err(ParceMacroError(Box::new(s), "? was applied to nothing".to_string()))
             },
             c if c.is_whitespace() => {}
-            c => return Err(LexerMacroError(Box::new(s), format!("{} is not a valid beginning to any lexer pattern", c)))
+            c => return Err(ParceMacroError(Box::new(s), format!("{} is not a valid beginning to any lexer pattern", c)))
         }
         i += 1;
     }
     if result.len() == 0 {
-        Err(LexerMacroError(Box::new(s), "this shouldn't be possible".to_string()))
+        Err(ParceMacroError(Box::new(s), "this shouldn't be possible".to_string()))
     } else if result.len() == 1 {
         Ok(result.remove(0))
     } else {
