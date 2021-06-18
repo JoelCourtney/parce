@@ -6,7 +6,6 @@ use check_keyword::CheckKeyword;
 use std::collections::HashMap;
 use crate::common::*;
 
-
 #[derive(Debug)]
 struct VariantInfo {
     modes: Vec<String>,
@@ -27,6 +26,8 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
     } else {
         vec![String::from("Default")]
     };
+
+    let visibility = input.vis.clone();
 
     let mut variant_info = vec![];
     let mut current_modes = vec![modes.first().unwrap().clone()];
@@ -145,13 +146,18 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
 
     let default_mode = format_ident!("{}", modes.first().unwrap().clone());
 
+    let submission = format_ident!("{}ParserSubmission", lexer_ident);
+
     Ok(quote! {
         #[derive(parce_macros::RemoveLexerAttributes, Debug, Eq, PartialEq, Copy, Clone, Hash)]
         #[allow(dead_code)]
         #input
 
+        #visibility struct #submission(pub core::any::TypeId, pub fn(u32, u32, parce::reexports::Lexeme<#ident>) -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]>);
+        parce::reexports::inventory::collect!(#submission);
+
         #[derive(Debug, Eq, PartialEq, Copy, Clone)]
-        enum #lexer_ident {
+        #visibility enum #lexer_ident {
             #(#mode_idents),*
         }
 

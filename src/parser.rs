@@ -61,7 +61,6 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
     let enum_ident = input.ident.clone();
     let num_productions = variants.len();
     let num_prod_index = syn::Index::from(num_productions);
-    let other_rule_paths: Vec<syn::Path> = other_rules.iter().map(|rule| syn::parse_str(rule).unwrap()).collect();
 
     let mut route_matchers = vec![];
     let mut route_assemblers = vec![];
@@ -128,10 +127,26 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
         });
     }
 
+    let mut parser_submission = lexer.clone();
+    let last_ident = parser_submission.segments.last().unwrap().ident.clone();
+    parser_submission.segments.last_mut().unwrap().ident = format_ident!("{}ParserSubmission", last_ident);
+
     Ok(quote! {
         #[derive(Debug, Eq, PartialEq)]
         #[allow(dead_code)]
         #input
+
+        parce::reexports::inventory::submit! {
+            #parser_submission(core::any::TypeId::of::<#enum_ident>(), |route: u32, state: u32, lexeme: parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>| -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]> {
+                use parce::reexports::*;
+                use AutomatonCommand::*;
+
+                match route {
+                    #(#route_matchers)*
+                    other => panic!("route {} out of bounds", other)
+                }
+            })
+        }
 
         impl parce::reexports::Parser for #enum_ident {
             type Lexemes = <#lexer as Lexer>::Lexemes;
@@ -144,21 +159,19 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                 use parce::reexports::*;
                 use AutomatonCommand::*;
 
-                println!("");
-                dbg!(route);
-                dbg!(state);
-                dbg!(&lexeme);
-                let result = if rule == Rule::of::<#enum_ident>() {
-                    match route {
+                if rule == Rule::of::<#enum_ident>() {
+                    return match route {
                         #(#route_matchers)*
                         other => panic!("route {} out of bounds", other)
                     }
-                } #(else if rule == Rule::of::<#other_rule_paths>() {
-                    <#other_rule_paths as Parser>::commands(rule, route, state, lexeme)
-                })* else {
-                    panic!("shouldn't be able to get here")
-                };
-                dbg!(result)
+                } else {
+                    for submission in inventory::iter::<#parser_submission> {
+                        if rule == submission.0 {
+                            return submission.1(route, state, lexeme);
+                        }
+                    }
+                    panic!("rule number {:?} not found", rule);
+                }
             }
             fn assemble(auto: parce::reexports::Rawtomaton, lexemes: &[parce::reexports::Lexeme<Self::Lexemes>], text: &str) -> (usize, Self) {
                 use parce::reexports::*;
@@ -173,9 +186,7 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                             other => panic!("route {} out of bounds, shouldn't be possible", other)
                         };
                         (consumed, result)
-                    } #(else if rule == Rule::of::<#other_rule_paths>() {
-                        <#other_rule_paths as Parser>::assemble(auto, lexemes, text)
-                    })* else {
+                    } else {
                         panic!("shouldn't be able to get here")
                     }
                 }
