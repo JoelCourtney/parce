@@ -7,3 +7,5 @@ pub use crate::parser::{*, automata::*};
 pub use crate::lexer::*;
 
 pub use core::any::TypeId as Rule;
+
+pub use inventory;

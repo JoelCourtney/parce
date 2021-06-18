@@ -152,8 +152,8 @@ mod tests {
 
     #[test]
     fn basic() {
-        // pass!("a b c" BasicGrammar::Thing);
-        // fail!("a b" BasicGrammar 3);
+        pass!("a b c" BasicGrammar::Thing);
+        fail!("a b" BasicGrammar 3);
     }
 
     ////// OR
@@ -165,10 +165,10 @@ mod tests {
 
     #[test]
     fn or() {
-        // pass!("abca" OrGrammar::Or);
-        // pass!("aba" OrGrammar::Or);
-        // fail!("aa" OrGrammar 1);
-        // fail!("a bbc a" OrGrammar 3);
+        pass!("abca" OrGrammar::Or);
+        pass!("aba" OrGrammar::Or);
+        fail!("aa" OrGrammar 1);
+        fail!("a bbc a" OrGrammar 3);
     }
 
     ////// STAR, PARSE COMPLETION
@@ -180,9 +180,9 @@ mod tests {
 
     #[test]
     fn star() {
-        // pass!("abc abc" StarGrammar::Star);
-        // assert_eq!("abc a".parse_max(), Ok((StarGrammar::Star, ParseCompletion::Incomplete(3))));
-        // fail!("abc a" StarGrammar 3);
+        pass!("abc abc" StarGrammar::Star);
+        assert_eq!("abc a".parse_max(), Ok((StarGrammar::Star, ParseCompletion::Incomplete(3))));
+        fail!("abc a" StarGrammar 3);
     }
 
     ////// Other Rules
