@@ -222,7 +222,7 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
                         _ => return Err(ParceError {
                             input: s.to_string(),
                             start,
-                            phase: ParcePhase::Lexer(self.to_string())
+                            phase: ParcePhase::Lex(self.to_string())
                         })
                     }
                 }

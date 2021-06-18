@@ -4,6 +4,7 @@ use super::ParceMacroError;
 use crate::common::*;
 use quote::{quote, format_ident};
 use syn::Path;
+use std::iter::FromIterator;
 
 struct VariantInfo {
     ident: Ident,
@@ -106,19 +107,21 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
         route_assemblers.push({
             let ident = variant.ident.clone();
             // TODO check fields are correct
-            match ident.fields {
+            match variant.fields {
                 VariantFields::Unit => quote! {
-                    { #assembler }
-                    Self::#ident
+                    #iu32 => {
+                        { #assembler }
+                        Self::#ident
+                    }
                 },
-                VariantFields::Unnamed(fields) => quote! {
+                VariantFields::Unnamed(_fields) => quote! {
                     let (#(#produced),*) = { #assembler };
                     Self::#ident(#(#produced),*)
-                }
+                },
                 VariantFields::Named(_) => quote! {
                     #iu32 => {
                         let (#(#produced),*) = { #assembler };
-                        Self::ident { #(#produced,*) }
+                        Self::ident { #(#produced),* }
                     }
                 }
             }
@@ -137,11 +140,15 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
             fn default_lexer() -> Box<dyn Lexer<Lexemes = <#lexer as Lexer>::Lexemes>> {
                 Box::new(#lexer::default())
             }
-            fn commands(rule: parce::reexports::Rule, route: u32, state: u32, lexeme: parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>) -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 2]> {
+            fn commands(rule: parce::reexports::Rule, route: u32, state: u32, lexeme: parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>) -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]> {
                 use parce::reexports::*;
                 use AutomatonCommand::*;
 
-                if rule == Rule::of::<#enum_ident>() {
+                println!("");
+                dbg!(route);
+                dbg!(state);
+                dbg!(&lexeme);
+                let result = if rule == Rule::of::<#enum_ident>() {
                     match route {
                         #(#route_matchers)*
                         other => panic!("route {} out of bounds", other)
@@ -150,9 +157,10 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                     <#other_rule_paths as Parser>::commands(rule, route, state, lexeme)
                 })* else {
                     panic!("shouldn't be able to get here")
-                }
+                };
+                dbg!(result)
             }
-            fn assemble(auto: parce::reexports::Rawtomaton, lexemes: &Vec<parce::reexports::Lexeme<Self::Lexemes>>, text: &str) -> (usize, Self) {
+            fn assemble(auto: parce::reexports::Rawtomaton, lexemes: &[parce::reexports::Lexeme<Self::Lexemes>], text: &str) -> (usize, Self) {
                 use parce::reexports::*;
 
                 unsafe {
@@ -160,10 +168,11 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                     if rule == Rule::of::<#enum_ident>() {
                         let mut consumed = 0;
                         let mut recruits = 0;
-                        Ok((match (**auto).route {
+                        let result = match (**auto).route {
                             #(#route_assemblers)*
                             other => panic!("route {} out of bounds, shouldn't be possible", other)
-                        }, consumed))
+                        };
+                        (consumed, result)
                     } #(else if rule == Rule::of::<#other_rule_paths>() {
                         <#other_rule_paths as Parser>::assemble(auto, lexemes, text)
                     })* else {
@@ -200,7 +209,7 @@ struct MatcherOutput {
     produced: Vec<Ident>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 enum EndBehavior {
     Last,
     NotLast,
@@ -235,9 +244,9 @@ impl ParseDiscriminantRule {
                 MatcherOutput {
                     main_route: quote! {
                         #first_u32 => if lexeme == <#lexer as Lexer>::Lexemes::#ident {
-                            array_vec!([AutomatonCommand;2] => #success)
+                            array_vec!([AutomatonCommand; 3] => #success)
                         } else {
-                            array_vec!([AutomatonCommand;2] => Die)
+                            array_vec!([AutomatonCommand; 3] => Die)
                         },
                     },
                     main_states: 1,
@@ -255,9 +264,9 @@ impl ParseDiscriminantRule {
                 };
                 MatcherOutput {
                     main_route: quote! {
-                        #first_u32 => array_vec!([AutomatonCommand;2] => Recruit {
+                        #first_u32 => array_vec!([AutomatonCommand; 3] => Recruit {
                             rule: Rule::of::<#r>(),
-                            production: 0_u32,
+                            route: 0_u32,
                             how_many: <#r as Parser>::PRODUCTIONS,
                             on_victory: #on_victory
                         }, Die),
@@ -265,7 +274,7 @@ impl ParseDiscriminantRule {
                     main_states: 1,
                     extra_routes: vec![],
                     assembler: quote! {
-                        let (more_consumed, _) = #r::assemble((**auto).children[#recruit_index], &lexemes[consumed..], text);
+                        let (more_consumed, _) = #r::assemble((**auto).children[recruits], &lexemes[consumed..], text);
                         consumed += more_consumed;
                         recruits += 1;
                     },
@@ -282,7 +291,7 @@ impl ParseDiscriminantRule {
                     }
                     _ => return Err(ParceMacroError(Box::new(info.ident.clone()), "variant does not have unnamed fields".to_string()))
                 };
-                let ident = format_ident!("unnamed_field_{}", syn::Index::from(n));
+                let ident = format_ident!("unnamed_field_{}", syn::Index::from(*n));
                 let on_victory = match end_behavior {
                     Last => quote! { Continuation::PassDie },
                     NotLast => quote! { Continuation::Advance },
@@ -290,7 +299,7 @@ impl ParseDiscriminantRule {
                 };
                 MatcherOutput {
                     main_route: quote! {
-                        #first_u32 => array_vec!([AutomatonCommand;2] => Recruit {
+                        #first_u32 => array_vec!([AutomatonCommand; 3] => Recruit {
                             rule: Rule::of::<#r>(),
                             production: 0_u32,
                             how_many: <#r as Parser>::PRODUCTIONS,
@@ -318,7 +327,7 @@ impl ParseDiscriminantRule {
                 let ident = format_ident!("{}", id);
                 MatcherOutput {
                     main_route: quote! {
-                        #first_u32 => array_vec!([AutomatonCommand;2] => Recruit {
+                        #first_u32 => array_vec!([AutomatonCommand; 3] => Recruit {
                             rule: Rule::of::<#ty>(),
                             production: 0_u32,
                             how_many: <#ty as Parser>::PRODUCTIONS,
@@ -328,7 +337,7 @@ impl ParseDiscriminantRule {
                     main_states: 1,
                     extra_routes: vec![],
                     assembler: quote! {
-                        let (more_consumed, #ident) = #r::assemble((**auto).children[recruits], &lexemes[consumed..], text);
+                        let (more_consumed, #ident) = #ty::assemble((**auto).children[recruits], &lexemes[consumed..], text);
                         consumed += more_consumed;
                         recruits += 1;
                         (#ident,)
@@ -346,8 +355,13 @@ impl ParseDiscriminantRule {
                 let mut main_route = quote! {};
                 let mut produced = vec![vec![]];
                 let mut assemblers = vec![];
-                for rule in &rules[..rules.len()-1] {
-                    let output = rule.to_matchers(grammar, lexer, info, state, next_route, EndBehavior::NotLast)?;
+                for (i, rule) in rules.iter().enumerate() {
+                    let output = rule.to_matchers(
+                        grammar, lexer,
+                        info,
+                        state, next_route,
+                        if i == rules.len() - 1 { end_behavior } else { EndBehavior::NotLast }
+                    )?;
                     next_route += output.extra_routes.len();
                     state += output.main_states;
                     extra_routes.extend(output.extra_routes);
@@ -356,29 +370,29 @@ impl ParseDiscriminantRule {
                         #main_route
                         #next_matcher
                     };
-                    assemblers.push(output.assembler);
-                    produced.push(output.produced);
+                    let new_assembler = output.assembler;
+                    let new_produced = output.produced;
+                    assemblers.push(if new_produced.len() == 0 {
+                        quote! {
+                            { #new_assembler }
+                        }
+                    } else {
+                        quote! {
+                            let (#(#new_produced,)*) = { #new_assembler };
+                        }
+                    });
+                    produced.push(new_produced);
                 }
 
-                let output = rules.last().unwrap().to_matchers(grammar, lexer, info, state, next_route, end_behavior)?;
-                extra_routes.extend(output.extra_routes);
-                state += output.main_states;
-                let next_matcher = output.main_route;
-                main_route = quote! {
-                    #main_route
-                    #next_matcher
-                };
-                assemblers.push(output.assembler);
-                produced.push(output.produced);
                 MatcherOutput {
                     main_route,
                     main_states: state - first_state,
                     extra_routes,
                     assembler: quote! {
-                        #(let #(#produced,)* = { #assemblers };)* // TODO will be an error when nothing is produced from assembler
-                        (#(#(produced,)*)*)
+                        #(#assemblers)*
+                        (#(#(#produced,)*)*)
                     },
-                    produced: produced.iter().flatten().collect(),
+                    produced: produced.into_iter().flatten().collect(),
                 }
             }
             Or(rules) => {
@@ -392,8 +406,8 @@ impl ParseDiscriminantRule {
                 let mut extra_routes = vec![];
                 let mut next_extra_route = next_route + rules.len();
                 let mut assemblers = vec![];
-                let mut produced = vec![];
-                for rule in rules {
+                let mut produced = std::collections::HashSet::<Ident>::new();
+                for (i, rule) in rules.iter().enumerate() {
                     let output = rule.to_matchers(grammar, lexer, info, 0, next_extra_route, EndBehavior::Last)?;
                     next_extra_route += output.extra_routes.len();
                     if end_behavior == Reset {
@@ -402,13 +416,27 @@ impl ParseDiscriminantRule {
                         main_routes.push((output.main_route, None));
                     }
                     extra_routes.extend(output.extra_routes);
-                    assemblers.push(output.assembler);
-                    produced = output.produced;
+                    let new_assembler = output.assembler;
+                    let route_number = syn::Index::from(next_route + i);
+                    assemblers.push(quote! {
+                        #route_number => {
+                            let mut recruits = 0;
+                            #new_assembler
+                        }
+                    });
+                    if i == 0 {
+                        produced = std::collections::HashSet::from_iter(output.produced.into_iter());
+                    } else {
+                        let set = std::collections::HashSet::<Ident>::from_iter(output.produced.into_iter());
+                        if set != produced {
+                            return Err(ParceMacroError(Box::new(info.ident.clone()), "not all possibilites in this pattern assign to the same fields in the enum variant".to_string()));
+                        }
+                    }
                 }
                 main_routes.extend(extra_routes);
                 MatcherOutput {
                     main_route: quote! {
-                        #first_u32 => array_vec!([AutomatonCommand;2] => Recruit {
+                        #first_u32 => array_vec!([AutomatonCommand; 3] => Recruit {
                             rule: Rule::of::<#grammar>(),
                             route: #next_u32,
                             how_many: #rules_len,
@@ -418,16 +446,18 @@ impl ParseDiscriminantRule {
                     main_states: 1,
                     extra_routes: main_routes,
                     assembler: quote! {
-                        let recruit = (**auto).children[recruits];
-                        match (**recruit).route {
-
+                        let auto = (**auto).children[recruits];
+                        match (**auto).route {
+                            #(#assemblers)*
+                            other => panic!("route {} out of bounds, this is an internal error", other)
                         }
+                        recruits += 1;
                     },
-                    produced,
+                    produced: produced.into_iter().collect(),
                 }
             }
             Star(rule) => {
-                let matcher_output = rule.to_matchers(grammar, lexer, info, 0, next_route + 1, EndBehavior::Reset)?;
+                let output = rule.to_matchers(grammar, lexer, info, 0, next_route + 1, EndBehavior::Reset)?;
                 let now = match end_behavior {
                     Last => quote! { Victory, Die },
                     NotLast => quote! { Advance },
@@ -438,11 +468,15 @@ impl ParseDiscriminantRule {
                     NotLast => quote! { Continuation::Advance },
                     Reset => quote! { Continuation::PassAdvance }
                 };
-                let mut extra_routes = vec![(matcher_output.main_route, Some(matcher_output.main_states))];
-                extra_routes.extend(matcher_output.extra_routes);
+                let mut extra_routes = vec![(output.main_route, Some(output.main_states))];
+                let main_states = syn::Index::from(output.main_states);
+                let assembler = output.assembler;
+                extra_routes.extend(output.extra_routes);
+                let produced = output.produced;
+                let produced_temps: Vec<_> = produced.iter().map(|id| format_ident!("{}_temp", id.to_string())).collect();
                 MatcherOutput {
                     main_route: quote! {
-                        #first_u32 => array_vec!([AutomatonCommand;2] => Recruit {
+                        #first_u32 => array_vec!([AutomatonCommand; 3] => Recruit {
                             rule: Rule::of::<#grammar>(),
                             route: #next_u32,
                             how_many: 1,
@@ -450,7 +484,38 @@ impl ParseDiscriminantRule {
                         }, #now),
                     },
                     main_states: 1,
-                    extra_routes
+                    extra_routes,
+                    assembler: if produced.len() != 0 {
+                        quote! {
+                            #(let #produced = Vec::with_capacity((**auto).state % #main_states);)*
+                            {
+                                let auto = (**auto).children[recruits];
+                                let mut recruits = 0;
+                                for _ in 0..((**auto).state % #main_states) {
+                                    let (#(#produced_temps,)*) = { #assembler };
+                                    #(#produced.push(#produced_temps);)*
+                                }
+                            }
+                            recruits += 1;
+                            (#(#produced,)*)
+                        }
+                    } else {
+                        quote! {
+                            {
+                                dbg!("hi");
+                                dbg!(&**auto);
+                                let repetitions = (**auto).state - 1;
+                                let auto = (**auto).children[recruits];
+                                dbg!("hello");
+                                let mut recruits = 0;
+                                for _ in 0..repetitions {
+                                    #assembler
+                                }
+                            }
+                            recruits += 1;
+                        }
+                    },
+                    produced
                 }
             }
             Dot => {
@@ -461,72 +526,14 @@ impl ParseDiscriminantRule {
                 };
                 MatcherOutput {
                     main_route: quote! {
-                        #first_u32 => array_vec!([AutomatonCommand;2] => #success)
+                        #first_u32 => array_vec!([AutomatonCommand; 3] => #success)
                     },
                     main_states: 1,
-                    extra_routes: vec![]
-                }
-            }
-            _ => todo!()
-        })
-    }
-
-    fn to_assembler(&self, info: &VariantInfo, next_route: u32, recruit_index: u32) -> Result<AssemblerOutput, ParceMacroError> {
-        use ParseDiscriminantRule::*;
-
-        Ok(match self {
-            Lexeme(l) => AssemblerOutput::consume(1),
-            Rule(name) => {
-                let rule = format_ident!("{}", name);
-                AssemblerOutput::rule(rule.into(), false, recruit_index)
-            }
-            BareUnnamedField(n) => {
-                let rule = match info.fields {
-                    VariantFields::Unnamed(ref v) => {
-                        match v.get(*n) {
-                            Some(t) => t,
-                            None => return Err(ParceMacroError(Box::new(info.ident.clone()), format!("production has fewer than {} fields", n)))
-                        }
-                    }
-                    _ => return Err(ParceMacroError(Box::new(info.ident.clone()), "variant does not have unnamed fields".to_string()))
-                };
-                let ident = format_ident!("unnamed_field_{}", syn::Index::from(n));
-                AssemblerOutput::rule(rule.into(), Some(ident), recruit_index)
-            },
-            BareNamedField(s) => {
-                let rule = info.fields.search_named(s)?;
-                let ident = format_ident!("{}", s);
-                AssemblerOutput::rule(rule.into(), Some(ident), recruit_index);
-            }
-            And(v) => {
-                let mut produced = vec![];
-                let mut recruits = 0;
-                let mut assemblers = vec![];
-                for part in v {
-                    let output = part.to_assembler(info, recruit_index + recruits)?;
-                    let new_produced = output.produced;
-                    let new_assembler = output.assembler;
-                    recruits += output.recruits;
-                    assemblers.push(quote! {
-                        let (more_consumed, #(#new_produced,)*) = { #new_assembler };
-                        consumed += more_consumed;
-                    });
-                    produced.extend(new_produced);
-                }
-                AssemblerOutput {
+                    extra_routes: vec![],
                     assembler: quote! {
-                        let mut consumed = 0;
-                        #(#assemblers)*
-                        (consumed, #(#produced),*)
+                        consumed += 1;
                     },
-                    produced,
-                    recruits
-                }
-            }
-            Or(v) => {
-                let
-                AssemblerOutput {
-
+                    produced: vec![]
                 }
             }
             _ => todo!()
