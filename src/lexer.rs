@@ -1,13 +1,14 @@
 use crate::ParceError;
+use std::fmt::Debug;
 
-pub trait Lexer: std::fmt::Display + std::fmt::Debug {
-    type Lexemes: Eq + Copy;
+pub trait Lexer: std::fmt::Display + Debug {
+    type Lexemes: Eq + Copy + std::fmt::Debug;
 
     fn lex(&mut self, s: &str) -> Result<Vec<Lexeme<Self::Lexemes>>, ParceError>;
 }
 
 #[derive(Debug, Default, Eq, PartialEq, Copy, Clone, Hash)]
-pub struct Lexeme<T: Copy + Eq> {
+pub struct Lexeme<T: Copy + Eq + Debug> {
     pub data: T,
     pub start: usize,
     pub len: usize
@@ -15,7 +16,7 @@ pub struct Lexeme<T: Copy + Eq> {
 
 /// Can only implement Lexeme<T> == T, because trying to implement T == Lexeme<T> violates
 /// orphan rules. When comparing a wrapped Lexeme to its internal type, put the lexeme first.
-impl<T: Copy + Eq> PartialEq<T> for Lexeme<T> {
+impl<T: Copy + Eq + Debug> PartialEq<T> for Lexeme<T> {
     fn eq(&self, other: &T) -> bool {
         self.data == *other
     }
@@ -44,14 +45,14 @@ mod tests {
             Err(ParceError {
                 input: $input.to_string(),
                 start: $start,
-                phase: ParcePhase::Lexer("Default".to_string())
+                phase: ParcePhase::Lex("Default".to_string())
             })
         };
         ($input:literal $start:literal $mode:literal) => {
             Err(ParceError {
                 input: $input.to_string(),
                 start: $start,
-                phase: ParcePhase::Lexer($mode.to_string())
+                phase: ParcePhase::Lex($mode.to_string())
             })
         }
     }

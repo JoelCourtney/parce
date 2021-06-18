@@ -109,7 +109,7 @@ impl<'a> Army<'a> {
         self.alloc(Automaton::new(rule, route)).into()
     }
 
-    pub unsafe fn command(&'a self, auto: Rawtomaton<'a>, actions: ArrayVec<[AutomatonCommand; 2]>) -> CommandResult<'a> {
+    pub unsafe fn command(&'a self, auto: Rawtomaton<'a>, actions: ArrayVec<[AutomatonCommand; 3]>) -> CommandResult<'a> {
         use AutomatonCommand::*;
 
         let mut clone: Option<Rawtomaton> = None;
@@ -128,6 +128,8 @@ impl<'a> Army<'a> {
         for action in actions {
             match action {
                 Advance => {
+                    println!("\n advancing");
+                    dbg!((**auto).route);
                     (**auto).state += 1;
                 }
                 Die => {
@@ -152,32 +154,32 @@ impl<'a> Army<'a> {
                     }
                 }
                 Victory => {
-                    let die = actions.contains(&AutomatonCommand::Die);
+                    let mut die = actions.contains(&AutomatonCommand::Die);
                     let mut auto = auto;
+                    (**auto).state += 1;
                     loop {
-                        (**auto).state += 1;
                         match (**auto).parent {
                             Some((parent, cont)) => {
+                                dbg!("\nadvancing parent");
+                                dbg!((**parent).route);
                                 (**parent).state += 1;
+                                if die {
+                                    (**parent).children.push(auto);
+                                } else {
+                                    (**parent).children.push(self.alloc((**auto).clone()).into());
+                                }
                                 match cont {
                                     Continuation::PassDie => {
+                                        dbg!("pass die");
                                         auto = parent;
+                                        die = true;
                                     }
                                     Continuation::PassAdvance => {
-                                        if die {
-                                            (**parent).children.push(auto);
-                                        } else {
-                                            (**parent).children.push(get_clone());
-                                        }
                                         result.reactivated.push(parent);
                                         auto = parent;
+                                        die = false;
                                     }
                                     Continuation::Advance => {
-                                        if die {
-                                            (**parent).children.push(auto);
-                                        } else {
-                                            (**parent).children.push(get_clone());
-                                        }
                                         result.reactivated.push(parent);
                                         break;
                                     }

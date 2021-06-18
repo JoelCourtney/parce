@@ -76,7 +76,9 @@ pub mod parser;
 
 pub use parce_macros::{lexer, parser};
 pub use crate::lexer::Lexer;
-pub use crate::parser::Parce;
+pub use crate::parser::Parse;
+pub use crate::parser::ParseCompletion;
+
 use std::fmt::Formatter;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -88,7 +90,7 @@ pub struct ParceError {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ParcePhase {
-    Lexer(String),
+    Lex(String),
     Parse,
     Assemble
 }
@@ -98,7 +100,7 @@ impl std::fmt::Display for ParceError {
         use colored::Colorize;
 
         match &self.phase {
-            ParcePhase::Lexer(mode) => {
+            ParcePhase::Lex(mode) => {
                 let start = self.start.saturating_sub(10);
                 let end = std::cmp::min(self.input.len(), self.start + 10);
                 let short = format!("{}{}{}",

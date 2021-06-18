@@ -6,22 +6,30 @@ use automata::*;
 use tinyvec::ArrayVec;
 use std::collections::VecDeque;
 use crate::{ParceError, ParcePhase};
+use std::fmt::Debug;
 
-pub trait Parce<O: Parser>: ToString  {
-    fn parce(&self) -> Result<O, ParceError>;
+pub trait Parse<O: Parser>: ToString  {
+    fn parse_max(&self) -> Result<(O, ParseCompletion), ParceError>;
+    fn parse_all(&self) -> Result<O, ParceError>;
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ParseCompletion {
+    Complete,
+    Incomplete(usize)
 }
 
 pub trait Parser: 'static + Sized {
-    type Lexemes: Copy + Eq;
+    type Lexemes: Copy + Eq + Debug;
     const PRODUCTIONS: u32;
 
     fn default_lexer() -> Box<dyn Lexer<Lexemes = Self::Lexemes>>;
-    fn commands(rule: Rule, route: u32, state: u32, lexeme: Lexeme<Self::Lexemes>) -> ArrayVec<[AutomatonCommand; 2]>;
+    fn commands(rule: Rule, route: u32, state: u32, lexeme: Lexeme<Self::Lexemes>) -> ArrayVec<[AutomatonCommand; 3]>;
     fn assemble(auto: Rawtomaton, lexemes: &[Lexeme<Self::Lexemes>], text: &str) -> (usize, Self);
 }
 
-impl<I: ToString, O: Parser> Parce<O> for I {
-    fn parce(&self) -> Result<O, ParceError> {
+impl<I: ToString, O: Parser> Parse<O> for I {
+    fn parse_max(&self) -> Result<(O, ParseCompletion), ParceError> {
         let text = self.to_string();
         let lexemes = O::default_lexer().lex(&text)?;
 
@@ -35,7 +43,7 @@ impl<I: ToString, O: Parser> Parce<O> for I {
         let mut last = None;
 
         let mut i = 0;
-        while !alive.is_empty() {
+        while !alive.is_empty() && i < lexemes.len() {
             let mut j = 0;
             while j < alive.len() {
                 let auto = alive[j];
@@ -62,11 +70,38 @@ impl<I: ToString, O: Parser> Parce<O> for I {
 
         if let Some(l) = last {
             let (consumed, result) = O::assemble(l, lexemes.as_slice(), &text);
-            result
+            let completion = if consumed == lexemes.len() {
+                ParseCompletion::Complete
+            } else {
+                ParseCompletion::Incomplete(lexemes[consumed-1].start + lexemes[consumed-1].len)
+            };
+            Ok((result, completion))
         } else {
             Err(ParceError {
                 input: text,
-                start: lexemes[i].start + lexemes[i].len,
+                start: if alive.len() == 0 {
+                    if i > 1 {
+                        lexemes[i-2].start + lexemes[i-2].len
+                    } else {
+                        0
+                    }
+                } else if i > 0 {
+                    lexemes[i-1].start + lexemes[i-1].len
+                } else {
+                    0
+                },
+                phase: ParcePhase::Parse
+            })
+        }
+    }
+
+    fn parse_all(&self) -> Result<O, ParceError> {
+        let (result, completion) = self.parse_max()?;
+        match completion {
+            ParseCompletion::Complete => Ok(result),
+            ParseCompletion::Incomplete(n) => Err(ParceError {
+                input: self.to_string(),
+                start: n,
                 phase: ParcePhase::Parse
             })
         }
@@ -78,99 +113,87 @@ mod tests {
     use crate as parce;
     use parce::*;
 
+    macro_rules! parser_error {
+        ($input:literal $start:literal) => {
+            Err(ParceError {
+                input: $input.to_string(),
+                start: $start,
+                phase: ParcePhase::Parse
+            })
+        };
+    }
+
+    macro_rules! pass {
+        ($str:literal $result:path) => {
+            assert_eq!($str.parse_all(), Ok($result))
+        }
+    }
+
+    macro_rules! fail {
+        ($str:literal $grammar:ident $where:literal) => {
+            assert_eq!($str.parse_all() as Result<$grammar,_>, parser_error!($str $where))
+        }
+    }
+
     #[lexer(MyLexer)]
     enum MyLexeme {
         A = "'a'",
-        B = "'b'"
+        B = "'b'",
+        C = "'c'",
+        #[skip] WhiteSpace = "[ \t\n\r]"
     }
+
+    ////// BASIC
 
     #[parser(MyLexer)]
-    enum MyGrammar {
-        Thing = "A (B | B B) A"
+    enum BasicGrammar {
+        Thing = "A B C"
     }
-
-    // #[parser(HellOLexer)]
-    // enum Hello {
-    //     One = " #Thing C* "
-    // }
 
     #[test]
-    fn parse() {
-        use crate::parser::Parce;
-        let now = std::time::Instant::now();
-        for _ in 0..1000 {
-            assert_eq!("abba".parce(), Ok(MyGrammar::Thing));
-        }
-        println!("{}", now.elapsed().as_micros());
+    fn basic() {
+        // pass!("a b c" BasicGrammar::Thing);
+        // fail!("a b" BasicGrammar 3);
     }
 
-    // impl Parser for MyGrammar {
-    //     type Lexemes = <MyLexer as Lexer>::Lexemes;
-    //     const PRODUCTIONS: u32 = 1;
-    //
-    //     fn default_lexer() -> Box<dyn Lexer<Lexemes = <MyLexer as Lexer>::Lexemes>> {
-    //         Box::new(MyLexer::default())
-    //     }
-    //     fn commands(rule: Rule, route: u32, state: u32, lexeme: Lexeme<<MyLexer as Lexer>::Lexemes>) -> ArrayVec<[AutomatonCommand; 2]> {
-    //         use AutomatonCommand::*;
-    //
-    //         // println!("");
-    //         // dbg!((route, state, lexeme));
-    //
-    //         let result = if rule == Rule::of::<MyGrammar>() {
-    //             match route {
-    //                 0 => {
-    //                     match state {
-    //                         0 => if lexeme == <MyLexer as Lexer>::Lexemes::A {
-    //                             array_vec!([AutomatonCommand;2] => Advance)
-    //                         } else {
-    //                             array_vec!([AutomatonCommand;2] => Die)
-    //                         }
-    //                         1 => array_vec!([AutomatonCommand;2] => Recruit {
-    //                             rule: Rule::of::<MyGrammar>(),
-    //                             route: 1,
-    //                             how_many: 2,
-    //                             on_victory: Continuation::Advance
-    //                         }, Die),
-    //                         2 => if lexeme == <MyLexer as Lexer>::Lexemes::A {
-    //                             array_vec!([AutomatonCommand;2] => Victory, Die)
-    //                         } else {
-    //                             array_vec!([AutomatonCommand;2] => Die)
-    //                         }
-    //                         _ => panic!("only three states")
-    //                     }
-    //                 }
-    //                 1 => {
-    //                     match state {
-    //                         0 => if lexeme == <MyLexer as Lexer>::Lexemes::B {
-    //                             array_vec!([AutomatonCommand;2] => Victory, Die)
-    //                         } else {
-    //                             array_vec!([AutomatonCommand;2] => Die)
-    //                         }
-    //                         _ => panic!("only 1 state")
-    //                     }
-    //                 }
-    //                 2 => {
-    //                     match state {
-    //                         0 => if lexeme == <MyLexer as Lexer>::Lexemes::B {
-    //                             array_vec!([AutomatonCommand;2] => Advance)
-    //                         } else {
-    //                             array_vec!([AutomatonCommand;2] => Die)
-    //                         }
-    //                         1 => array_vec!([AutomatonCommand;2] => Victory, Die),
-    //                         _ => panic!("only 2 states")
-    //                     }
-    //                 }
-    //                 _ => panic!("only 3 routes")
-    //             }
-    //         } else {
-    //             panic!("only one rule")
-    //         };
-    //         result
-    //     }
-    //
-    //     fn assemble(_auto: *mut Automaton) -> Self {
-    //         Self::Thing
-    //     }
-    // }
+    ////// OR
+
+    #[parser(MyLexer)]
+    enum OrGrammar {
+        Or = "A (B | B C) A"
+    }
+
+    #[test]
+    fn or() {
+        // pass!("abca" OrGrammar::Or);
+        // pass!("aba" OrGrammar::Or);
+        // fail!("aa" OrGrammar 1);
+        // fail!("a bbc a" OrGrammar 3);
+    }
+
+    ////// STAR, PARSE COMPLETION
+
+    #[parser(MyLexer)]
+    enum StarGrammar {
+        Star = "(A B C)*"
+    }
+
+    #[test]
+    fn star() {
+        // pass!("abc abc" StarGrammar::Star);
+        // assert_eq!("abc a".parse_max(), Ok((StarGrammar::Star, ParseCompletion::Incomplete(3))));
+        // fail!("abc a" StarGrammar 3);
+    }
+
+    ////// Other Rules
+
+    #[parser(MyLexer)]
+    enum DelegateGrammar {
+        Start = "A #OrGrammar A"
+    }
+
+    #[test]
+    fn other_rule() {
+        pass!("a aba a" DelegateGrammar::Start);
+    }
 }
