@@ -137,7 +137,7 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
         #input
 
         parce::reexports::inventory::submit! {
-            #parser_submission(core::any::TypeId::of::<#enum_ident>(), |route: u32, state: u32, lexeme: parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>| -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]> {
+            #parser_submission(core::any::TypeId::of::<#enum_ident>(), |route: u32, mut state: u32, lexeme: parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>| -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]> {
                 use parce::reexports::*;
                 use AutomatonCommand::*;
 
@@ -155,12 +155,12 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
             fn default_lexer() -> Box<dyn Lexer<Lexemes = <#lexer as Lexer>::Lexemes>> {
                 Box::new(#lexer::default())
             }
-            fn commands(rule: parce::reexports::Rule, route: u32, state: u32, lexeme: parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>) -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]> {
+            fn commands(rule: parce::reexports::Rule, route: u32, mut state: u32, lexeme: parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>) -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]> {
                 use parce::reexports::*;
                 use AutomatonCommand::*;
 
                 if rule == Rule::of::<#enum_ident>() {
-                    return match route {
+                    match route {
                         #(#route_matchers)*
                         other => panic!("route {} out of bounds", other)
                     }
@@ -471,8 +471,8 @@ impl ParseDiscriminantRule {
                 let output = rule.to_matchers(grammar, lexer, info, 0, next_route + 1, EndBehavior::Reset)?;
                 let now = match end_behavior {
                     Last => quote! { Victory, Die },
-                    NotLast => quote! { Advance },
-                    Reset => quote! { Victory, Advance }
+                    NotLast => quote! { Fallthrough },
+                    Reset => quote! { Victory, Fallthrough }
                 };
                 let on_victory = match end_behavior {
                     Last => quote! { Continuation::PassDie },
@@ -487,12 +487,17 @@ impl ParseDiscriminantRule {
                 let produced_temps: Vec<_> = produced.iter().map(|id| format_ident!("{}_temp", id.to_string())).collect();
                 MatcherOutput {
                     main_route: quote! {
-                        #first_u32 => array_vec!([AutomatonCommand; 3] => Recruit {
-                            rule: Rule::of::<#grammar>(),
-                            route: #next_u32,
-                            how_many: 1,
-                            on_victory: #on_victory
-                        }, #now),
+                        #first_u32 => {
+                            array_vec!([AutomatonCommand; 3] =>
+                                Recruit {
+                                    rule: Rule::of::<#grammar>(),
+                                    route: #next_u32,
+                                    how_many: 1,
+                                    on_victory: #on_victory
+                                },
+                                #now
+                            )
+                        }
                     },
                     main_states: 1,
                     extra_routes,
@@ -502,7 +507,7 @@ impl ParseDiscriminantRule {
                             {
                                 let auto = (**auto).children[recruits];
                                 let mut recruits = 0;
-                                for _ in 0..((**auto).state % #main_states) {
+                                for _ in 0..((**auto).state / #main_states) {
                                     let (#(#produced_temps,)*) = { #assembler };
                                     #(#produced.push(#produced_temps);)*
                                 }
@@ -513,13 +518,9 @@ impl ParseDiscriminantRule {
                     } else {
                         quote! {
                             {
-                                dbg!("hi");
-                                dbg!(&**auto);
-                                let repetitions = (**auto).state - 1;
                                 let auto = (**auto).children[recruits];
-                                dbg!("hello");
                                 let mut recruits = 0;
-                                for _ in 0..repetitions {
+                                for _ in 0..((**auto).state / #main_states) {
                                     #assembler
                                 }
                             }
@@ -537,7 +538,7 @@ impl ParseDiscriminantRule {
                 };
                 MatcherOutput {
                     main_route: quote! {
-                        #first_u32 => array_vec!([AutomatonCommand; 3] => #success)
+                        #first_u32 => array_vec!([AutomatonCommand; 3] => #success),
                     },
                     main_states: 1,
                     extra_routes: vec![],
