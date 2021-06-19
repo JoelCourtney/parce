@@ -73,7 +73,9 @@ pub enum AutomatonCommand {
     Victory,
 
     /// time to die :)
-    Die
+    Die,
+
+    Fallthrough
 }
 
 impl Default for AutomatonCommand {
@@ -86,7 +88,7 @@ impl Default for AutomatonCommand {
 pub enum Continuation {
     PassDie,
     PassAdvance,
-    Advance
+    Advance,
 }
 
 #[derive(Shrinkwrap)]
@@ -97,7 +99,8 @@ pub struct CommandResult<'a> {
     pub new_recruits: TinyVec<[Rawtomaton<'a>; 4]>,
     pub reactivated: TinyVec<[Rawtomaton<'a>; 4]>,
     pub victorious: Option<Rawtomaton<'a>>,
-    pub remove: bool
+    pub remove: bool,
+    pub fallthrough: bool
 }
 
 impl<'a> Army<'a> {
@@ -125,11 +128,9 @@ impl<'a> Army<'a> {
 
         let mut result = CommandResult::default();
 
-        for action in actions {
+        for action in &actions {
             match action {
                 Advance => {
-                    println!("\n advancing");
-                    dbg!((**auto).route);
                     (**auto).state += 1;
                 }
                 Die => {
@@ -142,13 +143,13 @@ impl<'a> Army<'a> {
                     on_victory
                 } => {
                     let mut die = actions.contains(&AutomatonCommand::Die);
-                    for i in 0..how_many {
-                        let new = self.recruit(rule, route + i);
+                    for i in 0..*how_many {
+                        let new = self.recruit(*rule, route + i);
                         if die {
-                            (**new).parent = Some((auto, on_victory));
+                            (**new).parent = Some((auto, *on_victory));
                             die = false;
                         } else {
-                            (**new).parent = Some((get_clone(), on_victory));
+                            (**new).parent = Some((get_clone(), *on_victory));
                         }
                         result.new_recruits.push(new);
                     }
@@ -159,18 +160,16 @@ impl<'a> Army<'a> {
                     (**auto).state += 1;
                     loop {
                         match (**auto).parent {
-                            Some((parent, cont)) => {
-                                dbg!("\nadvancing parent");
-                                dbg!((**parent).route);
+                            Some((mut parent, cont)) => {
                                 (**parent).state += 1;
                                 if die {
                                     (**parent).children.push(auto);
                                 } else {
+                                    parent = self.alloc((**parent).clone()).into();
                                     (**parent).children.push(self.alloc((**auto).clone()).into());
                                 }
                                 match cont {
                                     Continuation::PassDie => {
-                                        dbg!("pass die");
                                         auto = parent;
                                         die = true;
                                     }
@@ -191,6 +190,10 @@ impl<'a> Army<'a> {
                             }
                         }
                     }
+                }
+                Fallthrough => {
+                    (**auto).state += 1;
+                    result.fallthrough = true
                 }
             }
         }

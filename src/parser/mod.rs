@@ -60,7 +60,7 @@ impl<I: ToString, O: Parser> Parse<O> for I {
                     }
                     if result.remove {
                         alive.remove(j);
-                    } else {
+                    } else if !result.fallthrough {
                         j += 1;
                     }
                 }
@@ -195,5 +195,18 @@ mod tests {
     #[test]
     fn other_rule() {
         pass!("a aba a" DelegateGrammar::Start);
+        pass!("a abca a" DelegateGrammar::Start);
+    }
+
+    ////// DOT & GREEDINESS
+
+    #[parser(MyLexer)]
+    enum DotGrammar {
+        Dot = "A B* C"
+    }
+
+    #[test]
+    fn dot_and_greedy() {
+        pass!("a b c" DotGrammar::Dot);
     }
 }
