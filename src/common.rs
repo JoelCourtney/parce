@@ -88,7 +88,7 @@ pub(crate) fn get_pattern(variant: &syn::Variant) -> Result<String, ParceMacroEr
     }
 }
 
-#[derive(Clone, Debug, Hash)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) enum RangeRuleMax {
     Infinite,
     Fixed,

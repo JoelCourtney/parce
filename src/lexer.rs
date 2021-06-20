@@ -153,7 +153,11 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
         #[allow(dead_code)]
         #input
 
-        #visibility struct #submission(pub core::any::TypeId, pub fn(u32, u32, parce::reexports::Lexeme<#ident>) -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]>);
+        #visibility struct #submission(
+            pub core::any::TypeId,
+            pub fn(u32, u32, parce::reexports::Lexeme<#ident>) -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]>,
+            pub fn(u32, u32) -> bool
+        );
         parce::reexports::inventory::collect!(#submission);
 
         #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -178,9 +182,9 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
         impl parce::reexports::Lexer for #lexer_ident {
             type Lexemes = #ident;
 
-            fn lex(&mut self, s: &str) -> Result<Vec<parce::reexports::Lexeme<#ident>>, parce::ParceError> {
+            fn lex(&mut self, s: &str) -> Result<Vec<parce::reexports::Lexeme<#ident>>, parce::error::ParceError> {
                 use parce::reexports::*;
-                use parce::{ParceError, ParcePhase};
+                use parce::error::{ParceError, ParcePhase};
 
                 fn dedup_tiny(tiny: &mut TinyVec<[usize; 2]>) {
                     if let Some(mut i) = tiny.len().checked_sub(1) {
