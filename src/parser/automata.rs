@@ -13,7 +13,7 @@ pub struct Automaton<'a> {
     pub children: TinyVec<[Rawtomaton<'a>; 2]>
 }
 
-#[derive(Shrinkwrap, Debug, Copy, Clone)]
+#[derive(Shrinkwrap, Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Rawtomaton<'a>(*mut Automaton<'a>);
 
 impl Default for Rawtomaton<'_> {
@@ -161,11 +161,12 @@ impl<'a> Army<'a> {
                     loop {
                         match (**auto).parent {
                             Some((mut parent, cont)) => {
-                                (**parent).state += 1;
                                 if die {
+                                    (**parent).state += 1;
                                     (**parent).children.push(auto);
                                 } else {
                                     parent = self.alloc((**parent).clone()).into();
+                                    (**parent).state += 1;
                                     (**parent).children.push(self.alloc((**auto).clone()).into());
                                 }
                                 match cont {

@@ -1,4 +1,4 @@
-use crate::ParceError;
+use crate::error::ParceError;
 use std::fmt::Debug;
 
 pub trait Lexer: std::fmt::Display + Debug {
@@ -45,14 +45,14 @@ mod tests {
             Err(ParceError {
                 input: $input.to_string(),
                 start: $start,
-                phase: ParcePhase::Lex("Default".to_string())
+                phase: error::ParcePhase::Lex("Default".to_string())
             })
         };
         ($input:literal $start:literal $mode:literal) => {
             Err(ParceError {
                 input: $input.to_string(),
                 start: $start,
-                phase: ParcePhase::Lex($mode.to_string())
+                phase: error::ParcePhase::Lex($mode.to_string())
             })
         }
     }
