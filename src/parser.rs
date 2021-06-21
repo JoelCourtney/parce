@@ -758,7 +758,7 @@ fn repetition_operator(rule: &Box<ParseDiscriminantRule>, op: RepetitionOperator
     let now = match (op, end_behavior) {
         (Range(_,_) | Plus, _) => quote! { Die },
         (_, EndBehavior::Last) => quote! { Victory, Die },
-        (_, EndBehavior::NotLast) => quote! { Fallthrough },
+        (_, EndBehavior::NotLast) => quote! { Advance, Fallthrough },
         (_, EndBehavior::Reset) => quote! { Victory, Fallthrough }
     };
     let on_victory = match end_behavior {
@@ -784,7 +784,7 @@ fn repetition_operator(rule: &Box<ParseDiscriminantRule>, op: RepetitionOperator
             extra.extend(output.extra_routes);
             (extra, quote! {
                 #init
-                if recruits != (**auto).children.len() {
+                if recruits < (**auto).children.len() {
                     let auto = (**auto).children[recruits];
                     if (**auto).route == #next_route_u32 {
                         let mut recruits = 0;

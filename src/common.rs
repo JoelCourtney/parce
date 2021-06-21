@@ -82,6 +82,9 @@ pub(crate) fn get_pattern(variant: &syn::Variant) -> Result<String, ParceMacroEr
         Some((_, syn::Expr::Lit(syn::ExprLit {
             lit: syn::Lit::Str(lit_str), ..
         }))) => Ok(lit_str.value()),
+        Some((_, syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Char(lit_char), ..
+        }))) => Ok(format!("'{}'", lit_char.value())),
         _ => {
             return Err(ParceMacroError(Box::new(variant.clone()), "discriminant must a str literal".to_string()));
         }
