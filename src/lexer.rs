@@ -65,7 +65,7 @@ mod tests {
 
     #[lexer(LiteralLexer)]
     enum LiteralLexeme {
-        A = "'a'",
+        A = 'a',
         B = "'b'"
     }
 

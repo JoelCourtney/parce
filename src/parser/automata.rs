@@ -193,7 +193,6 @@ impl<'a> Army<'a> {
                     }
                 }
                 Fallthrough => {
-                    (**auto).state += 1;
                     result.fallthrough = true
                 }
             }
