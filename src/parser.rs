@@ -176,10 +176,10 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
         }
 
         impl parce::reexports::Parser for #enum_ident {
-            type Lexemes = <#lexer as Lexer>::Lexemes;
+            type Lexer = #lexer;
             const PRODUCTIONS: u32 = #num_prod_index;
 
-            fn default_lexer() -> Box<dyn Lexer<Lexemes = <#lexer as Lexer>::Lexemes>> {
+            fn default_lexer() -> Box<Self::Lexer> {
                 Box::new(#lexer::default())
             }
             fn commands(rule: parce::reexports::Rule, route: u32, mut state: u32, lexeme: parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>) -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]> {
@@ -224,7 +224,7 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                     panic!("rule number {:?} not found", rule);
                 }
             }
-            fn assemble(auto: parce::reexports::Rawtomaton, lexemes: &[parce::reexports::Lexeme<Self::Lexemes>], text: &str) -> (usize, Self) {
+            fn assemble(auto: parce::reexports::Rawtomaton, lexemes: &[parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>], text: &str) -> (usize, Self) {
                 use parce::reexports::*;
 
                 unsafe {
@@ -330,7 +330,7 @@ impl ParseDiscriminantRule {
                 };
                 MatcherOutput {
                     main_route: quote! {
-                        #first_state_u32 => array_vec!([AutomatonCommand; 3] => Recruit {
+                        #first_state_u32 => array_vec!([AutomatonCommand; 3] => Spawn {
                             rule: Rule::of::<#r>(),
                             route: 0_u32,
                             how_many: <#r as Parser>::PRODUCTIONS,
@@ -368,7 +368,7 @@ impl ParseDiscriminantRule {
                 };
                 MatcherOutput {
                     main_route: quote! {
-                        #first_state_u32 => array_vec!([AutomatonCommand; 3] => Recruit {
+                        #first_state_u32 => array_vec!([AutomatonCommand; 3] => Spawn {
                             rule: Rule::of::<#r>(),
                             production: 0_u32,
                             how_many: <#r as Parser>::PRODUCTIONS,
@@ -399,7 +399,7 @@ impl ParseDiscriminantRule {
                 let ident = format_ident!("{}", id);
                 MatcherOutput {
                     main_route: quote! {
-                        #first_state_u32 => array_vec!([AutomatonCommand; 3] => Recruit {
+                        #first_state_u32 => array_vec!([AutomatonCommand; 3] => Spawn {
                             rule: Rule::of::<#ty>(),
                             production: 0_u32,
                             how_many: <#ty as Parser>::PRODUCTIONS,
@@ -518,7 +518,7 @@ impl ParseDiscriminantRule {
                 routes.extend(extra_routes);
                 MatcherOutput {
                     main_route: quote! {
-                        #first_state_u32 => array_vec!([AutomatonCommand; 3] => Recruit {
+                        #first_state_u32 => array_vec!([AutomatonCommand; 3] => Spawn {
                             rule: Rule::of::<#grammar>(),
                             route: #next_u32,
                             how_many: #rules_len,
@@ -847,7 +847,7 @@ fn repetition_operator(rule: &Box<ParseDiscriminantRule>, op: RepetitionOperator
                 quote! {
                     #first_state_u32 => {
                         array_vec!([AutomatonCommand; 3] =>
-                            Recruit {
+                            Spawn {
                                 rule: Rule::of::<#grammar>(),
                                 route: #next_route_u32,
                                 how_many: 1,
@@ -862,7 +862,7 @@ fn repetition_operator(rule: &Box<ParseDiscriminantRule>, op: RepetitionOperator
                 quote! {
                     #first_state_u32 => {
                         array_vec!([AutomatonCommand; 3] =>
-                            Recruit {
+                            Spawn {
                                 rule: Rule::of::<#grammar>(),
                                 route: #next_route_u32,
                                 how_many: 1,
@@ -873,7 +873,7 @@ fn repetition_operator(rule: &Box<ParseDiscriminantRule>, op: RepetitionOperator
                     }
                     #second_state_u32 => {
                         array_vec!([AutomatonCommand; 3] =>
-                            Recruit {
+                            Spawn {
                                 rule: Rule::of::<#grammar>(),
                                 route: #second_route_u32,
                                 how_many: 1,

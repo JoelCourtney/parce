@@ -128,7 +128,7 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
             let mode_ident = format_ident!("{}", mode);
             mode_setters.push(
                 quote! {
-                    #ident::#lexeme_ident => *self = #lexer_ident::#mode_ident,
+                    #ident::#lexeme_ident => self = #lexer_ident::#mode_ident,
                 }
             )
         }
@@ -182,9 +182,9 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
         impl parce::reexports::Lexer for #lexer_ident {
             type Lexemes = #ident;
 
-            fn lex(&mut self, s: &str) -> Result<Vec<parce::reexports::Lexeme<#ident>>, parce::error::ParceError> {
+            fn lex(mut self, s: &str) -> Result<Vec<parce::reexports::Lexeme<#ident>>, parce::error::ParceError> {
                 use parce::reexports::*;
-                use parce::error::{ParceError, ParcePhase};
+                use parce::error::{ParceError, ParceErrorInfo};
 
                 fn dedup_tiny(tiny: &mut TinyVec<[usize; 2]>) {
                     if let Some(mut i) = tiny.len().checked_sub(1) {
@@ -232,7 +232,7 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
                         _ => return Err(ParceError {
                             input: s.to_string(),
                             start,
-                            phase: ParcePhase::Lex(self.to_string())
+                            info: ParceErrorInfo::lex(self.to_string())
                         })
                     }
                 }
