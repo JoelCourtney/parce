@@ -4,11 +4,13 @@ use shrinkwraprs::Shrinkwrap;
 use tinyvec::{TinyVec, tiny_vec, ArrayVec};
 use std::ptr::null_mut;
 
+/// Represents the full state of a DFA used in the parser.
 #[derive(Clone, Debug)]
 pub struct Automaton<'a> {
     pub rule: Rule,
     pub route: u32,
     pub state: u32,
+    pub lexeme_start: usize,
     pub parent: Option<(Rawtomaton<'a>, Continuation)>,
     pub children: TinyVec<[Rawtomaton<'a>; 2]>
 }
@@ -36,11 +38,12 @@ impl<'a> From<&mut Automaton<'a>> for Rawtomaton<'a> {
 }
 
 impl Automaton<'_> {
-    fn new<'a>(rule: Rule, route: u32) -> Automaton<'a> {
+    fn new<'a>(rule: Rule, route: u32, lexeme_start: usize) -> Automaton<'a> {
         Automaton {
             rule,
             route,
             state: 0,
+            lexeme_start,
             parent: None,
             children: tiny_vec![]
         }
@@ -108,28 +111,21 @@ pub enum Continuation {
     Advance,
 }
 
+/// A wrapper around a typed arena of Automata. Handles the AutomatonCommands because they often
+/// require memory allocations.
 #[derive(Shrinkwrap)]
 pub(super) struct Army<'a>(Arena<Automaton<'a>>);
-
-#[derive(Default)]
-pub(super) struct CommandResult<'a> {
-    pub new_spawns: TinyVec<[Rawtomaton<'a>; 4]>,
-    pub reactivated: TinyVec<[Rawtomaton<'a>; 4]>,
-    pub victorious: Option<Rawtomaton<'a>>,
-    pub remove: bool,
-    pub fallthrough: bool
-}
 
 impl<'a> Army<'a> {
     pub fn new() -> Army<'a> {
         Army(Arena::with_capacity(10))
     }
 
-    pub fn spawn(&'a self, rule: Rule, route: u32) -> Rawtomaton {
-        self.alloc(Automaton::new(rule, route)).into()
+    pub fn spawn(&'a self, rule: Rule, route: u32, lexeme_start: usize) -> Rawtomaton {
+        self.alloc(Automaton::new(rule, route, lexeme_start)).into()
     }
 
-    pub(crate) unsafe fn command(&'a self, auto: Rawtomaton<'a>, actions: ArrayVec<[AutomatonCommand; 3]>) -> CommandResult<'a> {
+    pub(crate) unsafe fn command(&'a self, auto: Rawtomaton<'a>, actions: ArrayVec<[AutomatonCommand; 3]>, lexeme_index: usize) -> CommandResult<'a> {
         use AutomatonCommand::*;
 
         let mut clone: Option<Rawtomaton> = None;
@@ -161,7 +157,7 @@ impl<'a> Army<'a> {
                 } => {
                     let mut die = actions.contains(&AutomatonCommand::Die);
                     for i in 0..*how_many {
-                        let new = self.spawn(*rule, route + i);
+                        let new = self.spawn(*rule, route + i, lexeme_index);
                         if die {
                             (**new).parent = Some((auto, *on_victory));
                             die = false;
@@ -216,4 +212,13 @@ impl<'a> Army<'a> {
         }
         result
     }
+}
+
+#[derive(Default)]
+pub(super) struct CommandResult<'a> {
+    pub new_spawns: TinyVec<[Rawtomaton<'a>; 4]>,
+    pub reactivated: TinyVec<[Rawtomaton<'a>; 4]>,
+    pub victorious: Option<Rawtomaton<'a>>,
+    pub remove: bool,
+    pub fallthrough: bool
 }

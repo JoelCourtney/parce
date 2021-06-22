@@ -150,7 +150,7 @@ impl<I: ToString, O: Parser> Parse<O> for I {
         let mut alive: VecDeque<Rawtomaton> = VecDeque::new();
 
         for i in 0..O::PRODUCTIONS {
-            alive.push_back(army.spawn(Rule::of::<O>(), i).into());
+            alive.push_back(army.spawn(Rule::of::<O>(), i, 0).into());
         }
 
         let mut last = None;
@@ -162,7 +162,7 @@ impl<I: ToString, O: Parser> Parse<O> for I {
                 let auto = alive[j];
                 unsafe {
                     let commands = O::commands((**auto).rule, (**auto).route, (**auto).state, lexemes[i]);
-                    let result = army.command(auto, commands);
+                    let result = army.command(auto, commands, i);
                     alive.extend(result.new_spawns);
                     j += result.reactivated.len();
                     for old in result.reactivated {
@@ -185,7 +185,7 @@ impl<I: ToString, O: Parser> Parse<O> for I {
             for auto in &alive {
                 unsafe {
                     if O::last_commands((***auto).rule, (***auto).route, (***auto).state) {
-                        let result = army.command(*auto, tinyvec::array_vec!([AutomatonCommand; 3] => automata::AutomatonCommand::Victory));
+                        let result = army.command(*auto, tinyvec::array_vec!([AutomatonCommand; 3] => automata::AutomatonCommand::Victory), 0);
                         if let Some(vic) = result.victorious {
                             dbg!("hellO");
                             last = Some(vic);
@@ -257,7 +257,7 @@ mod tests {
     }
 
     macro_rules! pass {
-        ($str:literal $result:path) => {
+        ($str:literal $result:expr) => {
             assert_eq!($str.parse_all(), Ok($result))
         }
     }
@@ -270,12 +270,13 @@ mod tests {
 
     #[lexer(MyLexer)]
     enum MyLexeme {
-        A = "'a'",
-        B = "'b'",
-        C = "'c'",
-        D = "'d'",
-        E = "'e'",
-        F = "'f'",
+        A = 'a',
+        B = 'b',
+        C = 'c',
+        D = 'd',
+        E = 'e',
+        F = 'f',
+        G = 'g',
         #[skip] WhiteSpace = "[ \t\n\r]"
     }
 
@@ -461,5 +462,73 @@ mod tests {
         pass!("c abc" NestingGrammar::Star);
         pass!("c ab ab" NestingGrammar::Star);
         pass!("c abc ab abcccc" NestingGrammar::Star);
+    }
+
+    ////// BARE FIELDS
+
+    #[parser(MyLexer)]
+    enum BareUnnamedGrammar {
+        Basic(BasicGrammar) = "A 0 A",
+        StarVec(Vec<BasicGrammar>) = "B (C 0)*",
+        QuestionOption(Option<BasicGrammar>) = "C 0?",
+        PlusVec(Vec<BasicGrammar>) = "D (A 0)+",
+        RangeVec(Vec<BasicGrammar>) = "E 0{2,4}",
+        NestedVecOption(Vec<Option<BasicGrammar>>) = "F (D 0?)+",
+
+        Multiple(Option<BasicGrammar>, Vec<OrGrammar>) = "G 0? A 1+"
+    }
+
+    #[test]
+    fn bare_unnamed_grammar() {
+        pass!("a abc a" BareUnnamedGrammar::Basic(BasicGrammar::Thing));
+
+        pass!("b cabc cabc cabc" BareUnnamedGrammar::StarVec(vec![BasicGrammar::Thing, BasicGrammar::Thing, BasicGrammar::Thing]));
+        pass!("b" BareUnnamedGrammar::StarVec(vec![]));
+
+        pass!("c abc" BareUnnamedGrammar::QuestionOption(Some(BasicGrammar::Thing)));
+        pass!("c" BareUnnamedGrammar::QuestionOption(None));
+
+        pass!("d aabc aabc aabc" BareUnnamedGrammar::PlusVec(vec![BasicGrammar::Thing, BasicGrammar::Thing, BasicGrammar::Thing]));
+        pass!("d aabc" BareUnnamedGrammar::PlusVec(vec![BasicGrammar::Thing]));
+
+        pass!("e abc abc" BareUnnamedGrammar::RangeVec(vec![BasicGrammar::Thing, BasicGrammar::Thing]));
+
+        pass!("f dabc dd dabc" BareUnnamedGrammar::NestedVecOption(vec![Some(BasicGrammar::Thing), None, None, Some(BasicGrammar::Thing)]));
+
+        pass!("g abc a abca" BareUnnamedGrammar::Multiple(Some(BasicGrammar::Thing), vec![OrGrammar::Or]));
+    }
+
+    ////// NAMED FIELDS
+
+    #[parser(MyLexer)]
+    enum BareNamedGrammar {
+        Basic {hello: BasicGrammar} = "A hello A",
+        StarVec {there: Vec<BasicGrammar>} = "B (C there)*",
+        QuestionOption{general: Option<BasicGrammar>} = "C general?",
+        PlusVec {kenobi: Vec<BasicGrammar>} = "D (A kenobi)+",
+        RangeVec {some_body: Vec<BasicGrammar>} = "E some_body{2,4}", // i know somebody is one word, shush
+        NestedVecOption {once: Vec<Option<BasicGrammar>>} = "F (D once?)+",
+
+        Multiple {told: Option<BasicGrammar>, me: Vec<OrGrammar>} = "G told? A me+"
+    }
+
+    #[test]
+    fn bare_named_grammar() {
+        pass!("a abc a" BareNamedGrammar::Basic {hello: BasicGrammar::Thing});
+
+        pass!("b cabc cabc cabc" BareNamedGrammar::StarVec {there: vec![BasicGrammar::Thing, BasicGrammar::Thing, BasicGrammar::Thing]});
+        pass!("b" BareNamedGrammar::StarVec {there: vec![]});
+
+        pass!("c abc" BareNamedGrammar::QuestionOption {general: Some(BasicGrammar::Thing)});
+        pass!("c" BareNamedGrammar::QuestionOption {general: None});
+
+        pass!("d aabc aabc aabc" BareNamedGrammar::PlusVec {kenobi: vec![BasicGrammar::Thing, BasicGrammar::Thing, BasicGrammar::Thing]});
+        pass!("d aabc" BareNamedGrammar::PlusVec {kenobi: vec![BasicGrammar::Thing]});
+
+        pass!("e abc abc" BareNamedGrammar::RangeVec {some_body: vec![BasicGrammar::Thing, BasicGrammar::Thing]});
+
+        pass!("f dabc dd dabc" BareNamedGrammar::NestedVecOption {once: vec![Some(BasicGrammar::Thing), None, None, Some(BasicGrammar::Thing)]});
+
+        pass!("g abc a abca" BareNamedGrammar::Multiple {told: Some(BasicGrammar::Thing), me: vec![OrGrammar::Or]});
     }
 }
