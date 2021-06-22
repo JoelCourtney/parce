@@ -158,7 +158,7 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
     parser_submission.segments.last_mut().unwrap().ident = format_ident!("{}ParserSubmission", last_ident);
 
     Ok(quote! {
-        #[derive(Debug, Eq, PartialEq)]
+        #[derive(Debug, PartialEq)]
         #input
 
         parce::reexports::inventory::submit! {
@@ -234,7 +234,7 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                     panic!("rule number {:?} not found", rule);
                 }
             }
-            fn assemble(auto: parce::reexports::Rawtomaton, lexemes: &[parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>], text: &str) -> (usize, Self) {
+            fn assemble(auto: parce::reexports::Rawtomaton, lexemes: &[parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>], text: &str) -> Result<(usize, Self), parce::error::ParceError> {
                 use parce::reexports::*;
 
                 unsafe {
@@ -246,11 +246,20 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                             #(#route_assemblers)*
                             other => panic!("route {} out of bounds, shouldn't be possible", other)
                         };
-                        (consumed, result)
+                        Ok((consumed, result))
                     } else {
-                        panic!("shouldn't be able to get here")
+                        unreachable!()
                     }
                 }
+            }
+        }
+
+        impl std::str::FromStr for #enum_ident {
+            type Err = parce::error::ParceError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                use parce::parser::Parse;
+                s.parse_all()
             }
         }
     })
@@ -260,7 +269,7 @@ fn unwrap_type(mut ty: syn::Type) -> Result<syn::Type, ParceMacroError> {
     while let syn::Type::Path(syn::TypePath {ref path, ..}) = ty {
         if let Some(seg) = path.segments.first() {
             let id = seg.ident.clone();
-            if id.to_string() == "Vec" || id.to_string() == "Option" {
+            if id.to_string() == "Vec" || id.to_string() == "Option" || id.to_string() == "Box" {
                 ty = match &path.segments.first().unwrap().arguments {
                     syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments { args, .. }) => {
                         if args.len() == 1 {
@@ -381,7 +390,7 @@ impl ParserPattern {
                         #first_state_u32 => false,
                     },
                     assembler: quote! {
-                        let (more_consumed, _) = #r::assemble((**auto).children[recruits], &lexemes[consumed..], text);
+                        let (more_consumed, _) = #r::assemble((**auto).children[recruits], lexemes, text)?;
                         consumed += more_consumed;
                         recruits += 1;
                     },
@@ -419,10 +428,10 @@ impl ParserPattern {
                         #first_state_u32 => false,
                     },
                     assembler: quote! {
-                        let (more_consumed, #ident) = #r::assemble((**auto).children[recruits], &lexemes[consumed..], text);
+                        let (more_consumed, #ident) = #r::assemble((**auto).children[recruits], lexemes, text)?;
                         consumed += more_consumed;
                         recruits += 1;
-                        (#ident,)
+                        (#ident.into(),)
                     },
                     produced: vec![ident],
                 }
@@ -450,17 +459,84 @@ impl ParserPattern {
                         #first_state_u32 => false,
                     },
                     assembler: quote! {
-                        let (more_consumed, #ident) = #ty::assemble((**auto).children[recruits], &lexemes[consumed..], text);
+                        let (more_consumed, #ident) = #ty::assemble((**auto).children[recruits], lexemes, text)?;
                         consumed += more_consumed;
                         recruits += 1;
-                        (#ident,)
+                        (#ident.into(),)
                     },
                     produced: vec![ident],
                 }
             }
-            // AssignUnnamedField(n, rule) => {
-            //
-            // }
+            AssignUnnamedField(n, rule) => {
+                let output = rule.to_matchers(grammar, lexer, info, first_state, next_route, end_behavior)?;
+                let extra_produced = output.produced;
+                let ident = format_ident!("unnamed_field_{}", syn::Index::from(*n));
+                let mut produced = extra_produced.clone();
+                produced.insert(0, ident);
+                let assembler = output.assembler;
+                let assign = if extra_produced.len() == 0 {
+                    quote! {
+                        { #assembler }
+                    }
+                } else {
+                    quote! {
+                        let (#(#extra_produced,)*) = { #assembler };
+                    }
+                };
+                MatcherOutput {
+                    assembler: quote! {
+                        let start = dbg!(lexemes[consumed].start);
+                        #assign
+                        let end = lexemes[consumed-1].start + lexemes[consumed-1].len;
+                        (
+                            match text[start..end].parse() {
+                                Ok(res) => res,
+                                Err(e) => return Err(parce::error::ParceError {
+                                    input: text.to_string(),
+                                    start,
+                                    info: parce::error::ParceErrorInfo::Assemble
+                                })
+                            }, #(#extra_produced),*)
+                    },
+                    produced,
+                    ..output
+                }
+            }
+            AssignNamedField(s, rule) => {
+                let output = rule.to_matchers(grammar, lexer, info, first_state, next_route, end_behavior)?;
+                let extra_produced = output.produced;
+                let ident = format_ident!("{}", s);
+                let mut produced = extra_produced.clone();
+                produced.insert(0, ident);
+                let assembler = output.assembler;
+                let assign = if extra_produced.len() == 0 {
+                    quote! {
+                        { #assembler }
+                    }
+                } else {
+                    quote! {
+                        let (#(#extra_produced,)*) = { #assembler };
+                    }
+                };
+                MatcherOutput {
+                    assembler: quote! {
+                        let start = dbg!(lexemes[consumed].start);
+                        #assign
+                        let end = lexemes[consumed-1].start + lexemes[consumed-1].len;
+                        (
+                            match text[start..end].parse() {
+                                Ok(res) => res,
+                                Err(e) => return Err(parce::error::ParceError {
+                                    input: text.to_string(),
+                                    start,
+                                    info: parce::error::ParceErrorInfo::Assemble
+                                })
+                            }, #(#extra_produced),*)
+                    },
+                    produced,
+                    ..output
+                }
+            }
             And(rules) => {
                 let mut next_route = next_route;
                 let mut extra_routes = vec![];
@@ -604,8 +680,6 @@ impl ParserPattern {
                     produced: vec![]
                 }
             }
-
-            _ => todo!()
         })
     }
 }
