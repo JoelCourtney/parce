@@ -11,6 +11,7 @@ use quote::quote;
 mod lexer;
 mod parser;
 mod common;
+mod discriminants;
 
 use common::*;
 

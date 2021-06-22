@@ -6,10 +6,11 @@ use quote::{quote, format_ident};
 use syn::Path;
 use std::iter::FromIterator;
 use crate::common::RangeRuleMax;
+use crate::discriminants::parser_pattern;
 
 struct VariantInfo {
     ident: Ident,
-    pattern: ParseDiscriminantRule,
+    pattern: ParserPattern,
     fields: VariantFields
 }
 
@@ -41,14 +42,22 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
     for variant in &mut input.variants {
         variants.push(
             VariantInfo {
-                pattern: parse_rule(get_pattern(&variant)?)?,
+                pattern: parser_pattern(get_pattern(&variant)?)?,
                 ident: variant.ident.clone(),
                 fields: match variant.fields.clone() {
                     syn::Fields::Unnamed(syn::FieldsUnnamed {unnamed, ..}) => {
-                        VariantFields::Unnamed(unnamed.iter().map(|field| field.ty.clone()).collect())
+                        let mut fields = Vec::with_capacity(unnamed.len());
+                        for field in unnamed {
+                            fields.push(unwrap_type(field.ty.clone())?);
+                        }
+                        VariantFields::Unnamed(fields)
                     }
                     syn::Fields::Named(syn::FieldsNamed {named, ..}) => {
-                        VariantFields::Named(named.iter().map(|field| (field.ident.clone().unwrap(), field.ty.clone())).collect())
+                        let mut fields = Vec::with_capacity(named.len());
+                        for field in named {
+                            fields.push((field.ident.clone().unwrap(), unwrap_type(field.ty.clone())?));
+                        }
+                        VariantFields::Named(fields)
                     }
                     syn::Fields::Unit => VariantFields::Unit
                 }
@@ -129,13 +138,15 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                     }
                 },
                 VariantFields::Unnamed(_fields) => quote! {
-                    let (#(#produced),*) = { #assembler };
-                    Self::#ident(#(#produced),*)
+                    #iu32 => {
+                        let (#(#produced,)*) = { #assembler };
+                        Self::#ident(#(#produced),*)
+                    }
                 },
                 VariantFields::Named(_) => quote! {
                     #iu32 => {
-                        let (#(#produced),*) = { #assembler };
-                        Self::ident { #(#produced),* }
+                        let (#(#produced,)*) = { #assembler };
+                        Self::#ident { #(#produced),* }
                     }
                 }
             }
@@ -148,7 +159,6 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
 
     Ok(quote! {
         #[derive(Debug, Eq, PartialEq)]
-        #[allow(dead_code)]
         #input
 
         parce::reexports::inventory::submit! {
@@ -246,21 +256,49 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
     })
 }
 
+fn unwrap_type(mut ty: syn::Type) -> Result<syn::Type, ParceMacroError> {
+    while let syn::Type::Path(syn::TypePath {ref path, ..}) = ty {
+        if let Some(seg) = path.segments.first() {
+            let id = seg.ident.clone();
+            if id.to_string() == "Vec" || id.to_string() == "Option" {
+                ty = match &path.segments.first().unwrap().arguments {
+                    syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments { args, .. }) => {
+                        if args.len() == 1 {
+                            match args.first().unwrap() {
+                                syn::GenericArgument::Type(new_ty) => new_ty.clone(),
+                                _ => return Err(ParceMacroError(Box::new(ty), "only generic type arguments are allowed".to_string()))
+                            }
+                        } else {
+                            return Err(ParceMacroError(Box::new(ty), "must have exactly one arg".to_string()));
+                        }
+                    }
+                    _ => return Err(ParceMacroError(Box::new(ty), "must be a single angle bracketed generic argument".to_string()))
+                };
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    Ok(ty)
+}
+
 #[derive(Debug)]
-enum ParseDiscriminantRule {
+pub(crate) enum ParserPattern {
     Lexeme(String),
     Rule(String),
     BareUnnamedField(usize),
-    AssignUnnamedField(usize, Box<ParseDiscriminantRule>),
+    AssignUnnamedField(usize, Box<ParserPattern>),
     BareNamedField(String),
-    AssignNamedField(String, Box<ParseDiscriminantRule>),
-    And(Vec<ParseDiscriminantRule>),
-    Or(Vec<ParseDiscriminantRule>),
+    AssignNamedField(String, Box<ParserPattern>),
+    And(Vec<ParserPattern>),
+    Or(Vec<ParserPattern>),
     Dot,
-    Star(Box<ParseDiscriminantRule>),
-    Plus(Box<ParseDiscriminantRule>),
-    Question(Box<ParseDiscriminantRule>),
-    Range(Box<ParseDiscriminantRule>, usize, RangeRuleMax),
+    Star(Box<ParserPattern>),
+    Plus(Box<ParserPattern>),
+    Question(Box<ParserPattern>),
+    Range(Box<ParserPattern>, usize, RangeRuleMax),
 }
 
 struct MatcherOutput {
@@ -279,7 +317,7 @@ enum EndBehavior {
     Reset
 }
 
-impl ParseDiscriminantRule {
+impl ParserPattern {
     // pay attention now
     fn to_matchers(
         &self,
@@ -290,7 +328,7 @@ impl ParseDiscriminantRule {
         next_route: usize,
         end_behavior: EndBehavior,
     ) -> Result<MatcherOutput, ParceMacroError> {
-        use ParseDiscriminantRule::*;
+        use ParserPattern::*;
         use EndBehavior::*;
 
         let first_state_u32 = syn::Index::from(first_state);
@@ -332,7 +370,7 @@ impl ParseDiscriminantRule {
                     main_route: quote! {
                         #first_state_u32 => array_vec!([AutomatonCommand; 3] => Spawn {
                             rule: Rule::of::<#r>(),
-                            route: 0_u32,
+                            route: 0,
                             how_many: <#r as Parser>::PRODUCTIONS,
                             on_victory: #on_victory
                         }, Die),
@@ -370,7 +408,7 @@ impl ParseDiscriminantRule {
                     main_route: quote! {
                         #first_state_u32 => array_vec!([AutomatonCommand; 3] => Spawn {
                             rule: Rule::of::<#r>(),
-                            production: 0_u32,
+                            route: 0,
                             how_many: <#r as Parser>::PRODUCTIONS,
                             on_victory: #on_victory
                         }, Die),
@@ -401,7 +439,7 @@ impl ParseDiscriminantRule {
                     main_route: quote! {
                         #first_state_u32 => array_vec!([AutomatonCommand; 3] => Spawn {
                             rule: Rule::of::<#ty>(),
-                            production: 0_u32,
+                            route: 0,
                             how_many: <#ty as Parser>::PRODUCTIONS,
                             on_victory: #on_victory
                         }, Die),
@@ -580,7 +618,7 @@ enum RepetitionOperator {
     Range(usize, RangeRuleMax)
 }
 
-fn repetition_operator(rule: &Box<ParseDiscriminantRule>, op: RepetitionOperator, grammar: &Ident, lexer: &Path, info: &VariantInfo, first_state: usize, next_route: usize, end_behavior: EndBehavior) -> Result<MatcherOutput, ParceMacroError> {
+fn repetition_operator(rule: &Box<ParserPattern>, op: RepetitionOperator, grammar: &Ident, lexer: &Path, info: &VariantInfo, first_state: usize, next_route: usize, end_behavior: EndBehavior) -> Result<MatcherOutput, ParceMacroError> {
     use RepetitionOperator::*;
 
     let first_state_u32 = syn::Index::from(first_state);
@@ -750,7 +788,7 @@ fn repetition_operator(rule: &Box<ParseDiscriminantRule>, op: RepetitionOperator
     let (init, receiver, assign) = match (op, produced.is_empty()) {
         (_, true) => (quote! {}, quote! { { #interior_assembler } }, quote! {}),
         (Question, _) => (quote! { #(let mut #produced = None;)* }, quote! { let (#(#produced_temps,)*) = { #interior_assembler }; }, quote! { #(#produced = Some(#produced_temps);)* }),
-        (_,_) => (quote! { #(let mut #produced = Vec::with_capacity((**auto).state % #cycle_length_u32);)* },
+        (_,_) => (quote! { #(let mut #produced = Vec::with_capacity(((**auto).state / #cycle_length_u32) as usize);)* },
                   quote! { let (#(#produced_temps,)*) = { #interior_assembler }; },
                   quote! { #(#produced.push(#produced_temps);)* })
     };
@@ -786,15 +824,17 @@ fn repetition_operator(rule: &Box<ParseDiscriminantRule>, op: RepetitionOperator
                 #init
                 if recruits < (**auto).children.len() {
                     let auto = (**auto).children[recruits];
-                    if (**auto).route == #next_route_u32 {
-                        let mut recruits = 0;
-                        for _ in 0..((**auto).state / #cycle_length_u32) {
-                            #receiver
-                            #assign
+                    if (**auto).route == #next_route_u32 && (**auto).lexeme_start == consumed {
+                        {
+                            let mut recruits = 0;
+                            for _ in 0..((**auto).state / #cycle_length_u32) {
+                                #receiver
+                                #assign
+                            }
                         }
+                        recruits += 1;
                     }
                 }
-                recruits += 1;
                 #returns
             })
         }
@@ -904,205 +944,3 @@ fn repetition_operator(rule: &Box<ParseDiscriminantRule>, op: RepetitionOperator
     })
 }
 
-fn parse_rule(s: String) -> Result<ParseDiscriminantRule, ParceMacroError> {
-    let chars: Vec<char> = s.chars().collect();
-
-    let mut i = 0;
-    let mut splits = vec![-1];
-    let mut group_depth = 0;
-    while i < s.len() {
-        match chars[i] {
-            '(' => group_depth += 1,
-            ')' => group_depth -= 1,
-            '|' if group_depth == 0 => {
-                splits.push(i as i32);
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    if splits.len() > 1 {
-        splits.push(s.len() as i32);
-        let mut options = vec![];
-        for j in 0..splits.len()-1 {
-            options.push(parse_rule(s[(splits[j]+1) as usize..splits[j+1] as usize].to_string())?);
-        }
-        return Ok(ParseDiscriminantRule::Or(options));
-    }
-
-    let mut result = vec![];
-    i = 0;
-    while i < s.len() {
-        match chars[i] {
-            '#' => {
-                let mut j = i + 1;
-                while j < s.len() && (chars[j].is_alphanumeric() || chars[j] == ':') {
-                    j += 1;
-                }
-                result.push(ParseDiscriminantRule::Rule(s[i+1..j].to_string()));
-                i = j - 1;
-            }
-            '(' => {
-                let mut j = i + 1;
-                let mut group_depth: u32 = 1;
-                while j < s.len() {
-                    match chars[j] {
-                        '(' => group_depth += 1,
-                        ')' => {
-                            group_depth -= 1;
-                            if group_depth == 0 {
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                    j += 1;
-                }
-                if j != s.len() {
-                    result.push(parse_rule(s[i+1..j].to_string())?);
-                    i = j;
-                } else {
-                    return Err(ParceMacroError(Box::new(s), "reached end of string before () group was closed".to_string()));
-                }
-            }
-            c if c.is_alphabetic() => {
-                let mut j = i + 1;
-                while j < s.len() && chars[j].is_alphanumeric() {
-                    j += 1;
-                }
-                let name = s[i..j].to_string();
-                if c.is_uppercase() {
-                    result.push(ParseDiscriminantRule::Lexeme(name));
-                    i = j - 1;
-                } else {
-                    if j < s.len() - 1 && chars[j] == '=' {
-                        let mut k = j + 2;
-                        match chars[j + 1] {
-                            c if c.is_alphabetic() || c == '#' => {
-                                while k < s.len() {
-                                    if chars[k].is_alphabetic() {
-                                        k += 1;
-                                    } else {
-                                        break
-                                    }
-                                }
-                            }
-                            '(' => {
-                                let mut group_depth = 1;
-                                while k < s.len() {
-                                    match chars[k] {
-                                        '(' => group_depth += 1,
-                                        ')' => {
-                                            group_depth -= 1;
-                                            if group_depth == 0 {
-                                                break;
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                    k += 1;
-                                }
-                            }
-                            other => return Err(ParceMacroError(Box::new(s.clone()), format!("'{}' is not valid after =", other)))
-                        }
-                        result.push(ParseDiscriminantRule::AssignNamedField(name, Box::new(parse_rule(s[j+1..k].to_string())?)));
-                        i = k - 1;
-                    } else {
-                        result.push(ParseDiscriminantRule::BareNamedField(name));
-                        i = j - 1;
-                    }
-                }
-            }
-            c if c.is_numeric() => {
-                let mut j = i + 1;
-                while j < s.len() && chars[j].is_numeric() {
-                    j += 1;
-                }
-                let name = match s[i..j].parse() {
-                    Ok(n) => n,
-                    Err(_) => panic!("how even")
-                };
-                if j < s.len() && chars[j] == '=' {
-                    let mut k = j + 1;
-                    let mut group_depth: u32 = 0;
-                    while k < s.len() {
-                        match chars[k] {
-                            '(' => group_depth += 1,
-                            ')' => group_depth -= 1,
-                            c if c.is_whitespace() && group_depth == 0 => break,
-                            _ => {}
-                        }
-                        k += 1;
-                    }
-                    result.push(ParseDiscriminantRule::AssignUnnamedField(name, Box::new(parse_rule(s[j+1..k].to_string())?)));
-                    i = k - 1;
-                } else {
-                    result.push(ParseDiscriminantRule::BareUnnamedField(name));
-                    i = j - 1;
-                }
-            }
-            '{' => {
-                match result.pop() {
-                    Some(prev) => {
-                        let mut j = i + 1;
-                        while j < s.len() {
-                            match chars[j] {
-                                '}' => break,
-                                _ => j += 1
-                            }
-                        }
-                        if j != s.len() {
-                            let captures = COUNT_PARSER.captures(&s[i..j + 1]);
-                            match captures {
-                                Some(cap) => {
-                                    result.push(
-                                        ParseDiscriminantRule::Range(
-                                            Box::new(prev),
-                                            cap[1].parse().unwrap(),
-                                            match cap.get(2) {
-                                                Some(s) => RangeRuleMax::Some(s.as_str().parse().unwrap()),
-                                                None => {
-                                                    if s[i..j+1].contains(',') {
-                                                        RangeRuleMax::Infinite
-                                                    } else {
-                                                        RangeRuleMax::Fixed
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    );
-                                }
-                                None => return Err(ParceMacroError(Box::new(s), "invalid counter operator".to_string()))
-                            }
-                            i = j;
-                        }
-                    }
-                    None => return Err(ParceMacroError(Box::new(s), "{} was applied to nothing".to_string()))
-                }
-            }
-            '.' => result.push(ParseDiscriminantRule::Dot),
-            '*' => match result.pop() {
-                Some(l) => result.push(ParseDiscriminantRule::Star(Box::new(l))),
-                None => return Err(ParceMacroError(Box::new(s), "* was applied to nothing".to_string()))
-            },
-            '+' => match result.pop() {
-                Some(l) => result.push(ParseDiscriminantRule::Plus(Box::new(l))),
-                None => return Err(ParceMacroError(Box::new(s), "+ was applied to nothing".to_string()))
-            },
-            '?' => match result.pop() {
-                Some(l) => result.push(ParseDiscriminantRule::Question(Box::new(l))),
-                None => return Err(ParceMacroError(Box::new(s), "? was applied to nothing".to_string()))
-            },
-            c if c.is_whitespace() => {}
-            c => return Err(ParceMacroError(Box::new(s), format!("{} is not a valid beginning to any parser pattern", c)))
-        }
-        i += 1;
-    }
-    if result.len() == 0 {
-        Err(ParceMacroError(Box::new(s), "this shouldn't be possible".to_string()))
-    } else if result.len() == 1 {
-        Ok(result.remove(0))
-    } else {
-        Ok(ParseDiscriminantRule::And(result))
-    }
-}

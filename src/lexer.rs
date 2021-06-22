@@ -5,6 +5,7 @@ use inflector::Inflector;
 use check_keyword::CheckKeyword;
 use std::collections::HashMap;
 use crate::common::*;
+use crate::discriminants::lexer_discriminant;
 
 #[derive(Debug)]
 struct VariantInfo {
@@ -243,22 +244,22 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
 }
 
 #[derive(Clone, Debug, Hash)]
-enum LexDiscriminantRule {
-    And(Vec<LexDiscriminantRule>),
-    Or(Vec<LexDiscriminantRule>),
+pub(crate) enum LexerPattern {
+    And(Vec<LexerPattern>),
+    Or(Vec<LexerPattern>),
     Class(String),
     Literal(String),
     Lexeme(String),
     Dot,
-    Star(Box<LexDiscriminantRule>),
-    Plus(Box<LexDiscriminantRule>),
-    Question(Box<LexDiscriminantRule>),
-    Range(Box<LexDiscriminantRule>, usize, RangeRuleMax)
+    Star(Box<LexerPattern>),
+    Plus(Box<LexerPattern>),
+    Question(Box<LexerPattern>),
+    Range(Box<LexerPattern>, usize, RangeRuleMax)
 }
 
-impl LexDiscriminantRule {
+impl LexerPattern {
     fn to_matcher(&self) -> (TokenStream2, TokenStream2) {
-        use LexDiscriminantRule::*;
+        use LexerPattern::*;
         // Heres the deal
         // Given a rule, produce a matcher
         // the matcher is an expression, that produces Some(len)
@@ -489,183 +490,6 @@ fn match_infinite(matcher: TokenStream2) -> TokenStream2 {
 }
 
 fn gen_matchers(s: String) -> Result<(TokenStream2, TokenStream2), ParceMacroError> {
-    let rule = parse_rule(s)?;
+    let rule = lexer_discriminant(s)?;
     Ok(rule.to_matcher())
-}
-
-
-fn parse_rule(s: String) -> Result<LexDiscriminantRule, ParceMacroError> {
-    let chars: Vec<char> = s.chars().collect();
-
-    // Search for |
-    let mut i = 0;
-    let mut in_string = false;
-    let mut group_depth = 0;
-    let mut class_depth = 0;
-    let mut splits = vec![-1_i32];
-    while i < s.len() {
-        match chars[i] {
-            '(' if !in_string && class_depth == 0 => group_depth += 1,
-            ')' if !in_string && class_depth == 0 => group_depth -= 1,
-            '[' if !in_string && (i == 0 || chars[i-1] != '\\' || class_depth == 0) => class_depth += 1,
-            ']' if !in_string && chars[i-1] != '\\' => class_depth -= 1,
-            '\'' if (!in_string && class_depth == 0) || (in_string && chars[i-1] != '\\') => {
-                in_string = !in_string;
-            }
-            '|' if !in_string && class_depth == 0 && group_depth == 0 => {
-                splits.push(i as i32);
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    if splits.len() > 1 {
-        splits.push(s.len() as i32);
-        let mut options = vec![];
-        for j in 0..splits.len()-1 {
-            options.push(parse_rule(s[(splits[j]+1) as usize..splits[j+1] as usize].to_string())?);
-        }
-        return Ok(LexDiscriminantRule::Or(options));
-    }
-
-    // Generate other lexemes. If just one return it, otherwise return And.
-    let mut result = vec![];
-    i = 0;
-    while i < s.len() {
-        match chars[i] {
-            '\'' => {
-                let mut j = i + 1;
-                while j < s.len() && chars[j] != '\'' && chars[j-1] != '\\' {
-                    j += 1;
-                }
-                if j != s.len() {
-                    result.push(LexDiscriminantRule::Literal(s[i+1..j].to_string()));
-                    i = j;
-                } else {
-                    return Err(ParceMacroError(Box::new(s), "reached end of pattern before string was closed".to_string()));
-                }
-            }
-            '[' => {
-                let mut j = i + 1;
-                let mut class_depth = 1;
-                while j < s.len() {
-                    match chars[j] {
-                        '[' if chars[j-1] != '\\' => class_depth += 1,
-                        ']' if chars[j-1] != '\\' => {
-                            class_depth -= 1;
-                            if class_depth == 0 {
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                    j += 1;
-                }
-                if j != s.len() {
-                    result.push(LexDiscriminantRule::Class(s[i..j+1].to_string()));
-                    i = j;
-                }
-            }
-            '(' => {
-                let mut j = i + 1;
-                let mut class_depth: u32 = 0;
-                let mut group_depth: u32 = 1;
-                let mut in_string = false;
-                while j < s.len() {
-                    match chars[j] {
-                        '(' if !in_string && class_depth == 0 => group_depth += 1,
-                        ')' if !in_string && class_depth == 0 => {
-                            group_depth -= 1;
-                            if group_depth == 0 {
-                                break;
-                            }
-                        }
-                        '[' if !in_string && (chars[j-1] != '\\' || class_depth == 0) => class_depth += 1,
-                        ']' if !in_string && chars[j-1] != '\\' => class_depth -= 1,
-                        '\'' if (!in_string && class_depth == 0) || (in_string && chars[j-1] != '\\') => {
-                            in_string = !in_string;
-                        }
-                        _ => {}
-                    }
-                    j += 1;
-                }
-                if j != s.len() {
-                    result.push(parse_rule(s[i+1..j].to_string())?);
-                    i = j;
-                } else {
-                    return Err(ParceMacroError(Box::new(s), "reached end of string before () group was closed".to_string()));
-                }
-            }
-            '{' => {
-                match result.pop() {
-                    Some(prev) => {
-                        let mut j = i + 1;
-                        while j < s.len() {
-                            match chars[j] {
-                                '}' => break,
-                                _ => j += 1
-                            }
-                        }
-                        if j != s.len() {
-                            let captures = COUNT_PARSER.captures(&s[i..j + 1]);
-                            match captures {
-                                Some(cap) => {
-                                    result.push(
-                                        LexDiscriminantRule::Range(
-                                            Box::new(prev),
-                                            cap[1].parse().unwrap(),
-                                            match cap.get(2) {
-                                                Some(s) => RangeRuleMax::Some(s.as_str().parse().unwrap()),
-                                                None => {
-                                                    if s[i..j+1].contains(',') {
-                                                        RangeRuleMax::Infinite
-                                                    } else {
-                                                        RangeRuleMax::Fixed
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    );
-                                }
-                                None => return Err(ParceMacroError(Box::new(s), "invalid counter operator".to_string()))
-                            }
-                            i = j;
-                        }
-                    }
-                    None => return Err(ParceMacroError(Box::new(s), "{} was applied to nothing".to_string()))
-                }
-            }
-            c if c.is_alphabetic() => {
-                let mut j = i + 1;
-                while j < s.len() && chars[j].is_alphanumeric() {
-                    j += 1;
-                }
-                result.push(LexDiscriminantRule::Lexeme(s[i..j].to_string()));
-                i = j - 1;
-            }
-            '.' => result.push(LexDiscriminantRule::Dot),
-            '*' => match result.pop() {
-                Some(l) => result.push(LexDiscriminantRule::Star(Box::new(l))),
-                None => return Err(ParceMacroError(Box::new(s), "* was applied to nothing".to_string()))
-            },
-            '+' => match result.pop() {
-                Some(l) => result.push(LexDiscriminantRule::Plus(Box::new(l))),
-                None => return Err(ParceMacroError(Box::new(s), "+ was applied to nothing".to_string()))
-            },
-            '?' => match result.pop() {
-                Some(l) => result.push(LexDiscriminantRule::Question(Box::new(l))),
-                None => return Err(ParceMacroError(Box::new(s), "? was applied to nothing".to_string()))
-            },
-            c if c.is_whitespace() => {}
-            c => return Err(ParceMacroError(Box::new(s), format!("{} is not a valid beginning to any lexer pattern", c)))
-        }
-        i += 1;
-    }
-    if result.len() == 0 {
-        Err(ParceMacroError(Box::new(s), "this shouldn't be possible".to_string()))
-    } else if result.len() == 1 {
-        Ok(result.remove(0))
-    } else {
-        Ok(LexDiscriminantRule::And(result))
-    }
 }
