@@ -15,43 +15,41 @@ Parce is used in three steps:
 
 A parce lexer is a single enum with the `lexer` attribute macro applied to it. Rules for each
 lexeme are written as a string literal discriminant which get turned into matching logic by the
-macro.
+macro. The example below is just to give you a feel for the syntax; the real docs for lexer creation
+are under the [lexer attribute macro](macro@lexer).
 
 ```rust
-use parce::prelude::*;
+use parce::*;
 
 #[lexer(MyLexer)]
 enum MyLexemes {
     AB = " 'ab' ", // match string literals with single quotes
-    ABC = " AB 'c' ", // nest other lexemes
+    ABC = " AB 'c'+ ", // nest other lexemes,
     XYOrZ = " [x-z] " // you can use regex-like character classes
 }
 
-// You don't have to use the lexer manually, this is just for demonstration:
-let mut lexer = MyLexer::default();
-let lexemes = lexer.lex("abcaby").unwrap();
-/*
-lexemes now contains: vec![
-    ABC     matched on "abc",
-    AB      matched on "ab",
-    XYOrZ   matched on "y"
-]
- */
+// The macro generates an enum "MyLexer" that implements the Lexer trait.
 ```
+
+### Creating a parser
+
+TODO
 
 ## Features
 
 ### Lexer Features
 
 - Regex-like repetition operators
-    - `*`, `+`, and `?`
-    - `{#}`, `{#,}`, and `{#,#}`    <- ANTLR doesn't have those :)
+    - The usual `*`, `+`, and `?`
+    - And also `{n}` (exactly n), `{n,}` (n or more), and `{n,m}` (between n and m inclusive)    <- ANTLR doesn't have those :)
 - Lexeme nesting
 - Regex-like character classes
 - Skipped lexemes
 - Fragment lexemes
 - Modal lexers
     - unlike ANTLR, lexemes can be active in multiple modes
+
+### Parser Features
 
 ## Comparison to ANTLR
 
@@ -71,5 +69,16 @@ Since Parce and ANTLR serve very similar purposes, here are the pros and cons of
 - ANTLR has more features.
     - Mixed lexer/parse grammars.
     - (there are others, but I don't know what they are off the top of my head.)
+
+## Future plans
+
+- Semantic predicates
+    - left-recursive grammar re-writing like ANTLR, using semantic predicates
+- Data post-processors
+- multi-threaded lexing and parsing.
+
+## Contributing
+
+If you find a bug or want a new feature, please create an issue or pull request on [GitHub](https://github.com/JoelCourtney/parce)!
 
 License: MIT OR Apache-2.0

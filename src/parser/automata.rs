@@ -13,6 +13,7 @@ pub struct Automaton<'a> {
     pub children: TinyVec<[Rawtomaton<'a>; 2]>
 }
 
+/// A newtype wrapper for a raw pointer to an [Automaton].
 #[derive(Shrinkwrap, Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Rawtomaton<'a>(*mut Automaton<'a>);
 
@@ -57,24 +58,36 @@ impl Eq for Automaton<'_> {}
 
 /// Commands that Automata can execute at each step.
 ///
-/// They can do as many of these as they need at each step.
+/// They can do as many of these as they need at each step, but in practice they never need
+/// more than three, so they are passed around in array_vecs of length 3.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum AutomatonCommand {
-    Recruit {
+    /// Spawns a new child (or children), whose state 0 will be evaluated on this same lexeme.
+    Spawn {
+        /// Which grammar rule to use
         rule: Rule,
+        /// Lowest route to use
         route: u32,
+        /// How many children to spawn. If greater than one, they are spawned on consecutive routes.
         how_many: u32,
+        /// What to do if a child declares victory.
         on_victory: Continuation
     },
 
     /// Increase state by one
     Advance,
 
+    /// Increase state by one. If this automaton is a child, reactivate the parent and follow its
+    /// on_victory instructions. Otherwise, a successful parse match was found.
     Victory,
 
-    /// time to die :)
+    /// Deactivate the automaton
     Die,
 
+    /// Makes the parser re-evaluate this automaton immediately after this step. This is used for
+    /// the star and question operators, because they need to spawn automata, then move to the next
+    /// state and evaluate that state all on one lexeme. *Must* be used together with either Advance
+    /// or Victory.
     Fallthrough
 }
 
@@ -84,19 +97,23 @@ impl Default for AutomatonCommand {
     }
 }
 
+/// What to do when an automaton's child declares victory.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Continuation {
+    /// Pass the victory to another level up, and die
     PassDie,
+    /// Pass the victory to another level up, but also stay alive and advance
     PassAdvance,
+    /// Don't pass on the victory, and advance
     Advance,
 }
 
 #[derive(Shrinkwrap)]
-pub struct Army<'a>(Arena<Automaton<'a>>);
+pub(super) struct Army<'a>(Arena<Automaton<'a>>);
 
 #[derive(Default)]
-pub struct CommandResult<'a> {
-    pub new_recruits: TinyVec<[Rawtomaton<'a>; 4]>,
+pub(super) struct CommandResult<'a> {
+    pub new_spawns: TinyVec<[Rawtomaton<'a>; 4]>,
     pub reactivated: TinyVec<[Rawtomaton<'a>; 4]>,
     pub victorious: Option<Rawtomaton<'a>>,
     pub remove: bool,
@@ -108,11 +125,11 @@ impl<'a> Army<'a> {
         Army(Arena::with_capacity(10))
     }
 
-    pub fn recruit(&'a self, rule: Rule, route: u32) -> Rawtomaton {
+    pub fn spawn(&'a self, rule: Rule, route: u32) -> Rawtomaton {
         self.alloc(Automaton::new(rule, route)).into()
     }
 
-    pub unsafe fn command(&'a self, auto: Rawtomaton<'a>, actions: ArrayVec<[AutomatonCommand; 3]>) -> CommandResult<'a> {
+    pub(crate) unsafe fn command(&'a self, auto: Rawtomaton<'a>, actions: ArrayVec<[AutomatonCommand; 3]>) -> CommandResult<'a> {
         use AutomatonCommand::*;
 
         let mut clone: Option<Rawtomaton> = None;
@@ -136,7 +153,7 @@ impl<'a> Army<'a> {
                 Die => {
                     result.remove = true;
                 }
-                Recruit {
+                Spawn {
                     rule,
                     route,
                     how_many,
@@ -144,14 +161,14 @@ impl<'a> Army<'a> {
                 } => {
                     let mut die = actions.contains(&AutomatonCommand::Die);
                     for i in 0..*how_many {
-                        let new = self.recruit(*rule, route + i);
+                        let new = self.spawn(*rule, route + i);
                         if die {
                             (**new).parent = Some((auto, *on_victory));
                             die = false;
                         } else {
                             (**new).parent = Some((get_clone(), *on_victory));
                         }
-                        result.new_recruits.push(new);
+                        result.new_spawns.push(new);
                     }
                 }
                 Victory => {

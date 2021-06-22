@@ -5,7 +5,7 @@ use core::any::TypeId as Rule;
 use automata::*;
 use tinyvec::ArrayVec;
 use std::collections::VecDeque;
-use crate::error::{ParceError, ParcePhase, ParsePhaseFailure};
+use crate::error::{ParceError, ParsePhaseFailure, ParceErrorInfo};
 use std::fmt::Debug;
 use crate::error::ParsePhaseFailure::NothingToParse;
 
@@ -60,13 +60,13 @@ pub enum ParseCompletion {
 
 /// Trait implemented by the [parce_macros::parser] attribute macro.
 pub trait Parser: 'static + Sized {
-    /// The lexemes enum used by this grammar.
-    type Lexemes: Copy + Eq + Debug;
+    type Lexer: Lexer;
+
     /// The number of variants in this rule.
     const PRODUCTIONS: u32;
 
     /// Returns the default lexer that will be used to generate the lexemes.
-    fn default_lexer() -> Box<dyn Lexer<Lexemes = Self::Lexemes>>;
+    fn default_lexer() -> Box<Self::Lexer>;
 
     /// The state machine used by the [Parse] trait to drive the automata during parsing.
     ///
@@ -103,7 +103,7 @@ pub trait Parser: 'static + Sized {
     ///     In cases where multiple child routes can succeed, it is perfectly normal to reactivate multiple
     ///     clones of the original parent.
     ///   - route 0 state 2 looks for A. If found, increments state, declares victory, and the parse is successful.
-    fn commands(rule: Rule, route: u32, state: u32, lexeme: Lexeme<Self::Lexemes>) -> ArrayVec<[AutomatonCommand; 3]>;
+    fn commands(rule: Rule, route: u32, state: u32, lexeme: Lexeme<<Self::Lexer as Lexer>::Lexemes>) -> ArrayVec<[AutomatonCommand; 3]>;
 
     /// This is a special case of the [Parser::commands] function. If parsing reaches the end of the lexemes and
     /// no rules are successful yet, [Parser::last_commands] is called because it is possible for the Star or Question
@@ -131,26 +131,26 @@ pub trait Parser: 'static + Sized {
     /// The last step of the parsing process. After the parse is successful, [Parser::assemble] builds the resulting
     /// grammar rule. `auto` is the automaton that was on the main route that was successful, and its
     /// pointers to its children are used to build the output.
-    fn assemble(auto: Rawtomaton, lexemes: &[Lexeme<Self::Lexemes>], text: &str) -> (usize, Self);
+    fn assemble(auto: Rawtomaton, lexemes: &[Lexeme<<Self::Lexer as Lexer>::Lexemes>], text: &str) -> (usize, Self);
 }
 
 impl<I: ToString, O: Parser> Parse<O> for I {
     fn parse_max(&self) -> Result<(O, ParseCompletion), ParceError> {
         let text = self.to_string();
-        if text.len() == 0 {
+        let lexemes = O::default_lexer().lex(&text)?;
+        if lexemes.len() == 0 {
             return Err(ParceError {
-                input: self.to_string(),
+                input: text,
                 start: 0,
-                phase: ParcePhase::Parse(NothingToParse)
+                info: ParceErrorInfo::Parse { failure: NothingToParse }
             })
         }
-        let lexemes = O::default_lexer().lex(&text)?;
 
         let army: Army = Army::new();
         let mut alive: VecDeque<Rawtomaton> = VecDeque::new();
 
         for i in 0..O::PRODUCTIONS {
-            alive.push_back(army.recruit(Rule::of::<O>(), i).into());
+            alive.push_back(army.spawn(Rule::of::<O>(), i).into());
         }
 
         let mut last = None;
@@ -163,7 +163,7 @@ impl<I: ToString, O: Parser> Parse<O> for I {
                 unsafe {
                     let commands = O::commands((**auto).rule, (**auto).route, (**auto).state, lexemes[i]);
                     let result = army.command(auto, commands);
-                    alive.extend(result.new_recruits);
+                    alive.extend(result.new_spawns);
                     j += result.reactivated.len();
                     for old in result.reactivated {
                         alive.push_front(old);
@@ -217,7 +217,7 @@ impl<I: ToString, O: Parser> Parse<O> for I {
                     0
                 },
                 input: text,
-                phase: ParcePhase::Parse(
+                info: ParceErrorInfo::parse(
                     if alive.len() == 0 {
                         ParsePhaseFailure::NoMatches
                     } else {
@@ -235,7 +235,7 @@ impl<I: ToString, O: Parser> Parse<O> for I {
             ParseCompletion::Incomplete(n) => Err(ParceError {
                 input: self.to_string(),
                 start: n+1,
-                phase: ParcePhase::Parse(ParsePhaseFailure::LeftoverLexemes)
+                info: ParceErrorInfo::parse(ParsePhaseFailure::LeftoverLexemes)
             })
         }
     }
@@ -251,7 +251,7 @@ mod tests {
             Err(parce::error::ParceError {
                 input: $input.to_string(),
                 start: $start,
-                phase: parce::error::ParcePhase::Parse(parce::error::ParsePhaseFailure::$error)
+                info: parce::error::ParceErrorInfo::parse(parce::error::ParsePhaseFailure::$error)
             })
         };
     }

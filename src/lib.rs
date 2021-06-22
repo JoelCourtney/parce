@@ -13,7 +13,8 @@
 //!
 //! A parce lexer is a single enum with the `lexer` attribute macro applied to it. Rules for each
 //! lexeme are written as a string literal discriminant which get turned into matching logic by the
-//! macro.
+//! macro. The example below is just to give you a feel for the syntax; the real docs for lexer creation
+//! are under the [lexer attribute macro](macro@lexer).
 //!
 //! ```
 //! use parce::*;
@@ -21,35 +22,32 @@
 //! #[lexer(MyLexer)]
 //! enum MyLexemes {
 //!     AB = " 'ab' ", // match string literals with single quotes
-//!     ABC = " AB 'c' ", // nest other lexemes
+//!     ABC = " AB 'c'+ ", // nest other lexemes,
 //!     XYOrZ = " [x-z] " // you can use regex-like character classes
 //! }
 //!
-//! // You don't have to use the lexer manually, this is just for demonstration:
-//! let mut lexer = MyLexer::default();
-//! let lexemes = lexer.lex("abcaby").unwrap();
-//! /*
-//! lexemes now contains: vec![
-//!     ABC     matched on "abc",
-//!     AB      matched on "ab",
-//!     XYOrZ   matched on "y"
-//! ]
-//!  */
+//! // The macro generates an enum "MyLexer" that implements the Lexer trait.
 //! ```
+//!
+//! ## Creating a parser
+//!
+//! TODO
 //!
 //! # Features
 //!
 //! ## Lexer Features
 //!
 //! - Regex-like repetition operators
-//!     - `*`, `+`, and `?`
-//!     - `{#}`, `{#,}`, and `{#,#}`    <- ANTLR doesn't have those :)
+//!     - The usual `*`, `+`, and `?`
+//!     - And also `{n}` (exactly n), `{n,}` (n or more), and `{n,m}` (between n and m inclusive)    <- ANTLR doesn't have those :)
 //! - Lexeme nesting
 //! - Regex-like character classes
 //! - Skipped lexemes
 //! - Fragment lexemes
 //! - Modal lexers
 //!     - unlike ANTLR, lexemes can be active in multiple modes
+//!
+//! ## Parser Features
 //!
 //! # Comparison to ANTLR
 //!
@@ -69,17 +67,32 @@
 //! - ANTLR has more features.
 //!     - Mixed lexer/parse grammars.
 //!     - (there are others, but I don't know what they are off the top of my head.)
+//!
+//! # Future plans
+//!
+//! - Semantic predicates
+//!     - left-recursive grammar re-writing like ANTLR, using semantic predicates
+//! - Data post-processors
+//! - multi-threaded lexing and parsing.
+//!
+//! # Contributing
+//!
+//! If you find a bug or want a new feature, please create an issue or pull request on [GitHub](https://github.com/JoelCourtney/parce)!
 
 pub mod reexports;
 pub mod lexer;
 pub mod parser;
 pub mod error;
 
-/// Generates a lexer enum and implements the Lexer trait for it. Also generates a ParserSubmission
-/// struct for use with the inventory crate.
+/// Generates a lexer enum and implements the Lexer trait for it.
 ///
-/// Requires name of lexer to be passed as argument. You will rarely (if ever) need to use the lexer directly,
+/// Must be applied to an enum with patterns as the discriminants. Requires name of lexer to be
+/// passed as argument. You will rarely (if ever) need to use the lexer directly,
 /// and you can find those docs on the Lexer trait in the main crate.
+///
+/// This macro also generates a ParserSubmission struct, which has to be publicly accessible to the user,
+/// but they shouldn't use it because it is only for internal use (it registers parsers through the
+/// inventory crate).
 ///
 /// # Examples
 ///
@@ -87,7 +100,7 @@ pub mod error;
 ///
 /// This lexer matches directly onto the characters 'a', 'b', and the words "Hello World!". Some valid inputs
 /// to this lexer would be "ab", "aHello World!b", "abbabbbbaaababHello World!", etc. Notice how whitespace
-/// will not be valid unless explicitedly allowed inside one of the rules.
+/// will not be valid unless explicitly allowed inside one of the rules.
 ///
 /// ```
 /// use parce::*; // omitted in future examples
@@ -250,22 +263,23 @@ pub mod error;
 /// #[lexer(ModalLexer)]
 /// #[modes(Mode0, Mode1)] // Mode0 is the default
 /// enum ModalLexemes {
-///     // These two are in Mode0
-///     A = 'a',
-///     #[set_mode(Mode1)] B = 'b',
+///     A = 'a', // only in Mode0
+///     #[set_mode(Mode1)] B = 'b', // only in Mode0; sets mode to Mode1 after being matched
 ///
-///     // These two are in Mode1
 ///     #[mode(Mode1)]
-///     C = 'c',
-///     #[set_mode(Mode0)] D = 'd',
+///     C = 'c', // only in Mode1
+///     #[set_mode(Mode0)] D = 'd', // only in Mode1; sets mode back to Mode0 after being matched
 ///
-///     // These are in both modes, so they can be matched in either
 ///     #[mode(Mode0, Mode1)]
-///     E = 'e',
-///     #[skip] Whitespace = " [ \n\t\r] "
+///     E = 'e', // matched in either mode
+///     #[skip] Whitespace = " [ \n\t\r] " // matched in either mode, and skipped
 /// }
+///
 /// assert!(ModalLexer::default().lex("aeab ccecd ab cd").is_ok());
-/// assert!(ModalLexer::default().lex("aaa c").is_err()) // mode was not set to Mode1 before the c.
+/// //                      Modes:     1--- 2---- 1- 2-
+///
+/// assert!(ModalLexer::default().lex("aaa c").is_err())
+/// //                      Modes:     1-- x   <- fails because mode was not set to mode1 before the c.
 /// ```
 ///
 /// Applying `#[mode]` or `#[set_mode]` to a fragment lexeme will do nothing. Fragments do not have modes,

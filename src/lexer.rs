@@ -1,16 +1,30 @@
 use crate::error::ParceError;
 use std::fmt::Debug;
+use shrinkwraprs::Shrinkwrap;
 
+/// Enables lexing a string into a vector of lexemes. The [parce_macros::lexer] attribute macro
+/// generates impls of this trait.
 pub trait Lexer: std::fmt::Display + Debug {
+    /// The enum type that the [parce_macros::lexer] attribute macro was applied to. These are
+    /// wrapped in the [Lexeme] type in the output.
     type Lexemes: Eq + Copy + std::fmt::Debug;
 
-    fn lex(&mut self, s: &str) -> Result<Vec<Lexeme<Self::Lexemes>>, ParceError>;
+    /// Lexes an input string into a vector of lexemes.
+    fn lex(self, s: &str) -> Result<Vec<Lexeme<Self::Lexemes>>, ParceError>;
 }
 
-#[derive(Debug, Default, Eq, PartialEq, Copy, Clone, Hash)]
+/// Wrapper for the lexeme enum, containing extra information about the location
+/// and length of the lexeme in the string input.
+#[derive(Shrinkwrap, Debug, Default, Eq, PartialEq, Copy, Clone, Hash)]
 pub struct Lexeme<T: Copy + Eq + Debug> {
-    pub data: T,
+    /// The lexeme matched in the input. The Lexeme struct is [Shrinkwrapped](shrinkwraprs)
+    /// around this field.
+    #[shrinkwrap(main_field)] pub data: T,
+
+    /// The index in the input string where the lexeme starts.
     pub start: usize,
+
+    /// The number characters the lexeme uses in the input.
     pub len: usize
 }
 
@@ -45,14 +59,14 @@ mod tests {
             Err(ParceError {
                 input: $input.to_string(),
                 start: $start,
-                phase: error::ParcePhase::Lex("Default".to_string())
+                info: error::ParceErrorInfo::lex("Default".to_string())
             })
         };
         ($input:literal $start:literal $mode:literal) => {
             Err(ParceError {
                 input: $input.to_string(),
                 start: $start,
-                phase: error::ParcePhase::Lex($mode.to_string())
+                info: error::ParceErrorInfo::lex($mode.to_string())
             })
         }
     }
