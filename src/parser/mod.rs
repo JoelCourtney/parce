@@ -1,3 +1,6 @@
+//! Contains traits for parsing, and the skeleton of the packrat parser algorithm used by the
+//! parsers.
+
 pub mod automata;
 
 use crate::lexer::{Lexeme, Lexer};
@@ -70,10 +73,10 @@ pub trait Parser: 'static + Sized {
 
     /// The state machine used by the [Parse] trait to drive the automata during parsing.
     ///
-    /// - rule: all commands will come from the [Parser::commands] function *on the type being parsed*,
+    /// - `rule`: all commands will come from the [Parser::commands] function *on the type being parsed*,
     ///   even if it uses other rules internally. So each implementation checks if rule is it's own type,
     ///   and delegates to other types if not.
-    /// - route: routes are a generalization of productions. The automata in this algorithm don't have
+    /// - `route`: routes are a generalization of productions. The automata in this algorithm don't have
     ///   branching decision trees, they are a straight line of requirements. Each top-level production
     ///   in a rule are the main routes, indexed 0 through `PRODUCTIONS - 1`. In grammars that could match
     ///   multiple different sets of lexemes, extra routes are generated for each path. For example,
@@ -88,11 +91,13 @@ pub trait Parser: 'static + Sized {
     ///   # }
     ///   #[parser(MyLexer)]
     ///   enum MyGrammar {
+    ///   // Route:   0----------
     ///       Rule = "A (B | C) A"
+    ///   // Route:      1   2
     ///   }
     ///   ```
     ///   The full rule is route 0, just the "B" is route 1, and just the "C" is route 2.
-    /// - state: Each time a requirement for a route is fulfilled, the state of the automaton is incremented.
+    /// - `state`: Each time a requirement for a route is fulfilled, the state of the automaton is incremented.
     ///   For example, in the grammar above:
     ///   - route 0 state 0 looks for A. If found, increments state
     ///   - route 0 state 1 doesn't look for anything, instead it spawns two more automata on routes 1 and 2,
@@ -103,9 +108,17 @@ pub trait Parser: 'static + Sized {
     ///     In cases where multiple child routes can succeed, it is perfectly normal to reactivate multiple
     ///     clones of the original parent.
     ///   - route 0 state 2 looks for A. If found, increments state, declares victory, and the parse is successful.
-    fn commands(rule: Rule, route: u32, state: u32, lexeme: Lexeme<<Self::Lexer as Lexer>::Lexemes>) -> ArrayVec<[AutomatonCommand; 3]>;
+    fn commands(
+        rule: Rule,
+        route: u32,
+        state: u32,
+        lexeme: Lexeme<<Self::Lexer as Lexer>::Lexemes>
+    ) -> ArrayVec<[AutomatonCommand; 3]>;
 
-    /// This is a special case of the [Parser::commands] function. If parsing reaches the end of the lexemes and
+    /// This is a special case of the [Parser::commands] function, run at the end of the lexemes if
+    /// no rules were matched.
+    ///
+    /// If parsing reaches the end of the lexemes and
     /// no rules are successful yet, [Parser::last_commands] is called because it is possible for the Star or Question
     /// operators to be unconditionally successful *after* all of the lexemes have been used. A result of
     /// `true` from this function means that the automaton would have been successful on the next lexeme,
@@ -131,7 +144,7 @@ pub trait Parser: 'static + Sized {
     /// The last step of the parsing process. After the parse is successful, [Parser::assemble] builds the resulting
     /// grammar rule. `auto` is the automaton that was on the main route that was successful, and its
     /// pointers to its children are used to build the output.
-    fn assemble(auto: Rawtomaton, lexemes: &[Lexeme<<Self::Lexer as Lexer>::Lexemes>], text: &str) -> (usize, Self);
+    fn assemble(auto: Rawtomaton, lexemes: &[Lexeme<<Self::Lexer as Lexer>::Lexemes>], text: &str) -> Result<(usize, Self), ParceError>;
 }
 
 impl<I: ToString, O: Parser> Parse<O> for I {
@@ -196,7 +209,7 @@ impl<I: ToString, O: Parser> Parse<O> for I {
         }
 
         if let Some(l) = last {
-            let (consumed, result) = O::assemble(l, lexemes.as_slice(), &text);
+            let (consumed, result) = O::assemble(l, lexemes.as_slice(), &text)?;
             let completion = if consumed == lexemes.len() {
                 ParseCompletion::Complete
             } else {
@@ -258,13 +271,13 @@ mod tests {
 
     macro_rules! pass {
         ($str:literal $result:expr) => {
-            assert_eq!($str.parse_all(), Ok($result))
+            assert_eq!($str.parse(), Ok($result))
         }
     }
 
     macro_rules! fail {
         ($str:literal $grammar:ident $where:literal $error:ident) => {
-            assert_eq!($str.parse_all() as Result<$grammar,_>, parser_error!($str $where $error))
+            assert_eq!($str.parse() as Result<$grammar,_>, parser_error!($str $where $error))
         }
     }
 
@@ -277,6 +290,9 @@ mod tests {
         E = 'e',
         F = 'f',
         G = 'g',
+        Digit = "[0-9]",
+        Period = '.',
+        Bool = "'true' | 'false'",
         #[skip] WhiteSpace = "[ \t\n\r]"
     }
 
@@ -464,7 +480,7 @@ mod tests {
         pass!("c abc ab abcccc" NestingGrammar::Star);
     }
 
-    ////// BARE FIELDS
+    ////// BARE UNNAMED FIELDS
 
     #[parser(MyLexer)]
     enum BareUnnamedGrammar {
@@ -475,7 +491,9 @@ mod tests {
         RangeVec(Vec<BasicGrammar>) = "E 0{2,4}",
         NestedVecOption(Vec<Option<BasicGrammar>>) = "F (D 0?)+",
 
-        Multiple(Option<BasicGrammar>, Vec<OrGrammar>) = "G 0? A 1+"
+        Multiple(Option<BasicGrammar>, Vec<OrGrammar>) = "G 0? A 1+",
+
+        Boxed(Option<Box<BareUnnamedGrammar>>) = "B A 0?"
     }
 
     #[test]
@@ -496,9 +514,11 @@ mod tests {
         pass!("f dabc dd dabc" BareUnnamedGrammar::NestedVecOption(vec![Some(BasicGrammar::Thing), None, None, Some(BasicGrammar::Thing)]));
 
         pass!("g abc a abca" BareUnnamedGrammar::Multiple(Some(BasicGrammar::Thing), vec![OrGrammar::Or]));
+
+        pass!("ba daabc" BareUnnamedGrammar::Boxed(Some(Box::new(BareUnnamedGrammar::PlusVec(vec![BasicGrammar::Thing])))));
     }
 
-    ////// NAMED FIELDS
+    ////// BARE NAMED FIELDS
 
     #[parser(MyLexer)]
     enum BareNamedGrammar {
@@ -509,8 +529,9 @@ mod tests {
         RangeVec {some_body: Vec<BasicGrammar>} = "E some_body{2,4}", // i know somebody is one word, shush
         NestedVecOption {once: Vec<Option<BasicGrammar>>} = "F (D once?)+",
 
-        Multiple {told: Option<BasicGrammar>, me: Vec<OrGrammar>} = "G told? A me+"
-    }
+        Multiple {told: Option<BasicGrammar>, me: Vec<OrGrammar>} = "G told? A me+",
+        Boxed {the: Option<Box<BareNamedGrammar>>} = "B A the?"
+}
 
     #[test]
     fn bare_named_grammar() {
@@ -530,5 +551,29 @@ mod tests {
         pass!("f dabc dd dabc" BareNamedGrammar::NestedVecOption {once: vec![Some(BasicGrammar::Thing), None, None, Some(BasicGrammar::Thing)]});
 
         pass!("g abc a abca" BareNamedGrammar::Multiple {told: Some(BasicGrammar::Thing), me: vec![OrGrammar::Or]});
+
+        pass!("ba daabc" BareNamedGrammar::Boxed {the: Some(Box::new(BareNamedGrammar::PlusVec {kenobi: vec![BasicGrammar::Thing]}))});
+    }
+
+    ////// ASSIGNED FIELDS
+
+    #[parser(MyLexer)]
+    enum AssignGrammar {
+        String(String) = "A 0=(B C D)",
+        Pass(String, BasicGrammar) = "B 0=1",
+        Number(f32, u64) = "C 0=(Digit+ Period Digit+) A 1=Digit+",
+        Bool {maybe: Vec<bool>} = "D (maybe=Bool)+"
+    }
+
+    #[test]
+    fn assigned_grammar() {
+        pass!("a b  cd" AssignGrammar::String("b  cd".to_string()));
+
+        pass!("b a b  c" AssignGrammar::Pass("a b  c".to_string(), BasicGrammar::Thing));
+
+        pass!("c 3.145 a 1105" AssignGrammar::Number(3.145, 1105));
+
+        pass!("d false" AssignGrammar::Bool {maybe: vec![false]});
+        pass!("d true false false" AssignGrammar::Bool {maybe: vec![true, false, false]});
     }
 }

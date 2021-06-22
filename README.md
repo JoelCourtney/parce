@@ -13,7 +13,7 @@ Parce is used in three steps:
 
 ### Creating a lexer
 
-A parce lexer is a single enum with the `lexer` attribute macro applied to it. Rules for each
+A lexer is a single enum with the [lexer attribute macro](macro@lexer) applied to it. Rules for each
 lexeme are written as a string literal discriminant which get turned into matching logic by the
 macro. The example below is just to give you a feel for the syntax; the real docs for lexer creation
 are under the [lexer attribute macro](macro@lexer).
@@ -23,9 +23,10 @@ use parce::*;
 
 #[lexer(MyLexer)]
 enum MyLexemes {
-    AB = " 'ab' ", // match string literals with single quotes
-    ABC = " AB 'c'+ ", // nest other lexemes,
-    XYOrZ = " [x-z] " // you can use regex-like character classes
+    Bool = " 'true' | 'false' ", // match string literals, use | for multiple possible patterns
+    Digit = "[0-9]", // use Regex-like character classes
+    And = '&', // can omit double quotes if pattern is a single character
+    #[skip] Whitespace = "[ \n\r\t]" // skippable lexemes
 }
 
 // The macro generates an enum "MyLexer" that implements the Lexer trait.
@@ -33,7 +34,13 @@ enum MyLexemes {
 
 ### Creating a parser
 
-TODO
+A parser is a collection of enums with the [parser attribute macro](macro@parser) applied to it.
+Each enum is a grammar rule, and the variants of the enum are productions. Again, the rules for
+each production are written as a string literal discriminant which is processed by the parser macro.
+The example below is just to give you a feel for the syntax; the real docs for parser creation are
+under the [parser attribute macro](macro@parser).
+
+TODO after left-recursion rewriting
 
 ## Features
 

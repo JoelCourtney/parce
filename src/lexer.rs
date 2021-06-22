@@ -1,3 +1,5 @@
+//! Contains the [Lexer] trait and the [Lexeme] wrapper struct used by the generated lexers.
+
 use crate::error::ParceError;
 use std::fmt::Debug;
 use shrinkwraprs::Shrinkwrap;

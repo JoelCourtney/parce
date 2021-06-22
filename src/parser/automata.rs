@@ -1,3 +1,5 @@
+//! Contains the automata used by the parser algorithm, and their basic operations.
+
 use typed_arena::Arena;
 use core::any::TypeId as Rule;
 use shrinkwraprs::Shrinkwrap;
@@ -7,11 +9,19 @@ use std::ptr::null_mut;
 /// Represents the full state of a DFA used in the parser.
 #[derive(Clone, Debug)]
 pub struct Automaton<'a> {
+    /// The rule this automaton is parsing
     pub rule: Rule,
+    /// The route it is parsing. See [Parser](crate::parser::Parser) for details on routes.
     pub route: u32,
+    /// The current state of the automaton
     pub state: u32,
+    /// The lexeme index that this automaton started parsing at.
+    ///
+    /// This is used in the assembly phase by Star and Question.
     pub lexeme_start: usize,
+    /// If this automaton is a child, this is a pointer to its parent.
     pub parent: Option<(Rawtomaton<'a>, Continuation)>,
+    /// After being successfully reawakened by a child, it is added to this vec
     pub children: TinyVec<[Rawtomaton<'a>; 2]>
 }
 

@@ -11,7 +11,7 @@
 //!
 //! ## Creating a lexer
 //!
-//! A parce lexer is a single enum with the `lexer` attribute macro applied to it. Rules for each
+//! A lexer is a single enum with the [lexer attribute macro](macro@lexer) applied to it. Rules for each
 //! lexeme are written as a string literal discriminant which get turned into matching logic by the
 //! macro. The example below is just to give you a feel for the syntax; the real docs for lexer creation
 //! are under the [lexer attribute macro](macro@lexer).
@@ -21,9 +21,10 @@
 //!
 //! #[lexer(MyLexer)]
 //! enum MyLexemes {
-//!     AB = " 'ab' ", // match string literals with single quotes
-//!     ABC = " AB 'c'+ ", // nest other lexemes,
-//!     XYOrZ = " [x-z] " // you can use regex-like character classes
+//!     Bool = " 'true' | 'false' ", // match string literals, use | for multiple possible patterns
+//!     Digit = "[0-9]", // use Regex-like character classes
+//!     And = '&', // can omit double quotes if pattern is a single character
+//!     #[skip] Whitespace = "[ \n\r\t]" // skippable lexemes
 //! }
 //!
 //! // The macro generates an enum "MyLexer" that implements the Lexer trait.
@@ -31,7 +32,13 @@
 //!
 //! ## Creating a parser
 //!
-//! TODO
+//! A parser is a collection of enums with the [parser attribute macro](macro@parser) applied to it.
+//! Each enum is a grammar rule, and the variants of the enum are productions. Again, the rules for
+//! each production are written as a string literal discriminant which is processed by the parser macro.
+//! The example below is just to give you a feel for the syntax; the real docs for parser creation are
+//! under the [parser attribute macro](macro@parser).
+//!
+//! TODO after left-recursion rewriting
 //!
 //! # Features
 //!
@@ -84,7 +91,7 @@ pub mod lexer;
 pub mod parser;
 pub mod error;
 
-/// Generates a lexer enum and implements the Lexer trait for it.
+/// Generates a lexer enum and implements the [Lexer](crate::lexer::Lexer) trait for it.
 ///
 /// Must be applied to an enum with patterns as the discriminants. Requires name of lexer to be
 /// passed as argument. You will rarely (if ever) need to use the lexer directly,
@@ -286,6 +293,18 @@ pub mod error;
 /// they can be used in any mode that has a lexeme that requires them. They also cannot set a new mode
 /// because they are never matched directly.
 pub use parce_macros::lexer;
+
+/// Generates an implementation of the [Parser](crate::parser::Parser) and [FromStr](std::str::FromStr)
+/// traits for an enum.
+///
+/// Must be applied to an enum with patterns as the discriminants. Requires name of *lexer* to be
+/// passed as argument.
+///
+/// # Examples
+///
+/// ## Basic Example
+///
+///
 pub use parce_macros::parser;
 
 pub use crate::lexer::Lexer;
