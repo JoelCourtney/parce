@@ -61,19 +61,19 @@ mod tests {
             Err(ParceError {
                 input: $input.to_string(),
                 start: $start,
-                info: error::ParceErrorInfo::lex("Default".to_string())
+                info: parce::error::ParceErrorInfo::lex("Default".to_string())
             })
         };
         ($input:literal $start:literal $mode:literal) => {
             Err(ParceError {
                 input: $input.to_string(),
                 start: $start,
-                info: error::ParceErrorInfo::lex($mode.to_string())
+                info: parce::error::ParceErrorInfo::lex($mode.to_string())
             })
         }
     }
 
-    use crate::*;
+    use crate::prelude::*;
     use crate as parce;
     use super::*;
 

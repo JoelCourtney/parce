@@ -158,11 +158,11 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
         #[derive(Debug, PartialEq)]
         #input
 
-        parce::reexports::inventory::submit! {
+        parce::internal_prelude::inventory::submit! {
             #parser_submission(
                 core::any::TypeId::of::<#enum_ident>(),
-                |route: u32, mut state: u32, lexeme: parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>| -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]> {
-                    use parce::reexports::*;
+                |route: u32, mut state: u32, lexeme: parce::internal_prelude::Lexeme<<#lexer as parce::internal_prelude::Lexer>::Lexemes>| -> parce::internal_prelude::ArrayVec<[parce::internal_prelude::AutomatonCommand; 3]> {
+                    use parce::internal_prelude::*;
                     use AutomatonCommand::*;
 
                     match route {
@@ -171,7 +171,7 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                     }
                 },
                 |route: u32, mut state: u32| -> bool {
-                    use parce::reexports::*;
+                    use parce::internal_prelude::*;
                     use AutomatonCommand::*;
 
                     match route {
@@ -182,15 +182,15 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
             )
         }
 
-        impl parce::reexports::Parser for #enum_ident {
+        impl parce::internal_prelude::Parseable for #enum_ident {
             type Lexer = #lexer;
             const PRODUCTIONS: u32 = #num_prod_index;
 
             fn default_lexer() -> Box<Self::Lexer> {
                 Box::new(#lexer::default())
             }
-            fn commands(rule: parce::reexports::Rule, route: u32, mut state: u32, lexeme: parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>) -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]> {
-                use parce::reexports::*;
+            fn commands(rule: parce::internal_prelude::Rule, route: u32, mut state: u32, lexeme: parce::internal_prelude::Lexeme<<#lexer as parce::internal_prelude::Lexer>::Lexemes>) -> parce::internal_prelude::ArrayVec<[parce::internal_prelude::AutomatonCommand; 3]> {
+                use parce::internal_prelude::*;
                 use AutomatonCommand::*;
 
                 dbg!((route, state, lexeme));
@@ -210,8 +210,8 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                     panic!("rule number {:?} not found", rule);
                 }
             }
-            fn last_commands(rule: parce::reexports::Rule, route: u32, mut state: u32) -> bool {
-                use parce::reexports::*;
+            fn last_commands(rule: parce::internal_prelude::Rule, route: u32, mut state: u32) -> bool {
+                use parce::internal_prelude::*;
                 use AutomatonCommand::*;
 
                 dbg!((route, state));
@@ -231,8 +231,8 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                     panic!("rule number {:?} not found", rule);
                 }
             }
-            fn assemble(auto: parce::reexports::Rawtomaton, lexemes: &[parce::reexports::Lexeme<<#lexer as Lexer>::Lexemes>], text: &str) -> Result<(usize, Self), parce::error::ParceError> {
-                use parce::reexports::*;
+            fn assemble(auto: parce::internal_prelude::Rawtomaton, lexemes: &[parce::internal_prelude::Lexeme<<#lexer as parce::internal_prelude::Lexer>::Lexemes>], text: &str) -> Result<(usize, Self), parce::error::ParceError> {
+                use parce::internal_prelude::*;
 
                 unsafe {
                     let rule = (**auto).rule;
@@ -350,7 +350,7 @@ impl ParserPattern {
                 };
                 MatcherOutput {
                     main_route: quote! {
-                        #first_state_u32 => if lexeme == <#lexer as Lexer>::Lexemes::#ident {
+                        #first_state_u32 => if lexeme == <#lexer as parce::internal_prelude::Lexer>::Lexemes::#ident {
                             array_vec!([AutomatonCommand; 3] => #success)
                         } else {
                             array_vec!([AutomatonCommand; 3] => Die)
@@ -377,7 +377,7 @@ impl ParserPattern {
                         #first_state_u32 => array_vec!([AutomatonCommand; 3] => Spawn {
                             rule: Rule::of::<#r>(),
                             route: 0,
-                            how_many: <#r as Parser>::PRODUCTIONS,
+                            how_many: <#r as Parseable>::PRODUCTIONS,
                             on_victory: #on_victory
                         }, Die),
                     },
@@ -415,7 +415,7 @@ impl ParserPattern {
                         #first_state_u32 => array_vec!([AutomatonCommand; 3] => Spawn {
                             rule: Rule::of::<#r>(),
                             route: 0,
-                            how_many: <#r as Parser>::PRODUCTIONS,
+                            how_many: <#r as Parseable>::PRODUCTIONS,
                             on_victory: #on_victory
                         }, Die),
                     },
@@ -446,7 +446,7 @@ impl ParserPattern {
                         #first_state_u32 => array_vec!([AutomatonCommand; 3] => Spawn {
                             rule: Rule::of::<#ty>(),
                             route: 0,
-                            how_many: <#ty as Parser>::PRODUCTIONS,
+                            how_many: <#ty as Parseable>::PRODUCTIONS,
                             on_victory: #on_victory
                         }, Die),
                     },

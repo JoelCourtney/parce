@@ -56,7 +56,7 @@ pub enum ParsePhaseFailure {
     InputEndedTooSoon,
     /// All productions failed to match the input.
     NoMatches,
-    /// When using [parse_all](crate::reexports::Parse::parse_all), the longest match did not
+    /// When using [parse_all](crate::parser::Parse::parse_all), the longest match did not
     /// use all of the lexemes in the input.
     LeftoverLexemes,
     /// Input vec of lexemes was empty.

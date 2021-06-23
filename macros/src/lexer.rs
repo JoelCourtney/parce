@@ -156,10 +156,10 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
 
         #visibility struct #submission(
             pub core::any::TypeId,
-            pub fn(u32, u32, parce::reexports::Lexeme<#ident>) -> parce::reexports::ArrayVec<[parce::reexports::AutomatonCommand; 3]>,
+            pub fn(u32, u32, parce::internal_prelude::Lexeme<#ident>) -> parce::internal_prelude::ArrayVec<[parce::internal_prelude::AutomatonCommand; 3]>,
             pub fn(u32, u32) -> bool
         );
-        parce::reexports::inventory::collect!(#submission);
+        parce::internal_prelude::inventory::collect!(#submission);
 
         #[derive(Debug, Eq, PartialEq, Copy, Clone)]
         #visibility enum #lexer_ident {
@@ -180,11 +180,11 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
             }
         }
 
-        impl parce::reexports::Lexer for #lexer_ident {
+        impl parce::internal_prelude::Lexer for #lexer_ident {
             type Lexemes = #ident;
 
-            fn lex(mut self, s: &str) -> Result<Vec<parce::reexports::Lexeme<#ident>>, parce::error::ParceError> {
-                use parce::reexports::*;
+            fn lex(mut self, s: &str) -> Result<Vec<parce::internal_prelude::Lexeme<#ident>>, parce::error::ParceError> {
+                use parce::internal_prelude::*;
                 use parce::error::{ParceError, ParceErrorInfo};
 
                 fn dedup_tiny(tiny: &mut TinyVec<[usize; 2]>) {

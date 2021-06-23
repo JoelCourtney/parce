@@ -11,7 +11,7 @@ use std::ptr::null_mut;
 pub struct Automaton<'a> {
     /// The rule this automaton is parsing
     pub rule: Rule,
-    /// The route it is parsing. See [Parser](crate::parser::Parser) for details on routes.
+    /// The route it is parsing. See [Parseable](crate::parser::Parseable) for details on routes.
     pub route: u32,
     /// The current state of the automaton
     pub state: u32,

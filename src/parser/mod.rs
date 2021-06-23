@@ -13,7 +13,13 @@ use std::fmt::Debug;
 use crate::error::ParsePhaseFailure::NothingToParse;
 
 /// Trait for parsing types that implement [ToString] into types that
-/// implement [Parser].
+/// implement [Parseable].
+///
+/// **NOTE** most users will just want to use the [FromStr](std::str::FromStr) trait,
+/// which is implemented for all parsers. Unfortunately that is difficult to document
+/// because it cannot be done with a blanket implementation due to orphan rules.
+/// The generated [FromStr](std::str::FromStr) implementation just delegates directly
+/// to [Parse::parse_all].
 ///
 /// This is implemented by default for all types that implement [ToString],
 /// you do not need to implement it yourself.
@@ -21,7 +27,7 @@ use crate::error::ParsePhaseFailure::NothingToParse;
 /// # Example
 ///
 /// ```
-/// use parce::*;
+/// use parce::prelude::*;
 ///
 /// #[lexer(MyLexer)]
 /// enum MyLexemes {
@@ -29,7 +35,7 @@ use crate::error::ParsePhaseFailure::NothingToParse;
 ///     B = "'b'"
 /// }
 ///
-/// #[parser(MyLexer)] // generates a Parser implementation for MyGrammar
+/// #[parser(MyLexer)] // generates a Parseable implementation for MyGrammar
 /// enum MyGrammar {
 ///     Rule = "A B"
 /// }
@@ -38,11 +44,11 @@ use crate::error::ParsePhaseFailure::NothingToParse;
 ///     let parsed: MyGrammar = "ab".parse_all().unwrap();
 /// }
 /// ```
-pub trait Parse<O: Parser>: ToString  {
+pub trait Parse<O: Parseable>: ToString  {
     /// Parses the production that matches the most number of lexemes. Might not use
     /// the entire set of lexemes.
     ///
-    /// If successful, returns a tuple (rule, completion) where completion indicates
+    /// If successful, returns a tuple `(rule, completion)` where `completion` indicates
     /// how many lexemes were used. If unsuccessful, returns [ParceError].
     fn parse_max(&self) -> Result<(O, ParseCompletion), ParceError>;
 
@@ -62,7 +68,9 @@ pub enum ParseCompletion {
 }
 
 /// Trait implemented by the [parce_macros::parser] attribute macro.
-pub trait Parser: 'static + Sized {
+///
+/// Contains the logic needed to drive the automata used in the packrat parser.
+pub trait Parseable: 'static + Sized {
     type Lexer: Lexer;
 
     /// The number of variants in this rule.
@@ -73,7 +81,7 @@ pub trait Parser: 'static + Sized {
 
     /// The state machine used by the [Parse] trait to drive the automata during parsing.
     ///
-    /// - `rule`: all commands will come from the [Parser::commands] function *on the type being parsed*,
+    /// - `rule`: all commands will come from the [Parseable::commands] function *on the type being parsed*,
     ///   even if it uses other rules internally. So each implementation checks if rule is it's own type,
     ///   and delegates to other types if not.
     /// - `route`: routes are a generalization of productions. The automata in this algorithm don't have
@@ -82,7 +90,7 @@ pub trait Parser: 'static + Sized {
     ///   multiple different sets of lexemes, extra routes are generated for each path. For example,
     ///   in the grammar:
     ///   ```
-    ///   # use parce::*;
+    ///   # use parce::prelude::*;
     ///   # #[lexer(MyLexer)]
     ///   # enum MyLexeme {
     ///   #   A = "'a'",
@@ -115,16 +123,16 @@ pub trait Parser: 'static + Sized {
         lexeme: Lexeme<<Self::Lexer as Lexer>::Lexemes>
     ) -> ArrayVec<[AutomatonCommand; 3]>;
 
-    /// This is a special case of the [Parser::commands] function, run at the end of the lexemes if
+    /// This is a special case of the [Parseable::commands] function, run at the end of the lexemes if
     /// no rules were matched.
     ///
     /// If parsing reaches the end of the lexemes and
-    /// no rules are successful yet, [Parser::last_commands] is called because it is possible for the Star or Question
+    /// no rules are successful yet, [Parseable::last_commands] is called because it is possible for the Star or Question
     /// operators to be unconditionally successful *after* all of the lexemes have been used. A result of
     /// `true` from this function means that the automaton would have been successful on the next lexeme,
     /// but only if it did not even need that lexeme to be there. For example, in this grammar:
     /// ```
-    /// # use parce::*;
+    /// # use parce::prelude::*;
     ///   # #[lexer(MyLexer)]
     ///   # enum MyLexeme {
     ///   #   A = "'a'",
@@ -141,13 +149,13 @@ pub trait Parser: 'static + Sized {
     /// But since there are no more lexemes, the star would not have the chance to be successful without this function.
     fn last_commands(rule: Rule, route: u32, state: u32) -> bool;
 
-    /// The last step of the parsing process. After the parse is successful, [Parser::assemble] builds the resulting
+    /// The last step of the parsing process. After the parse is successful, [Parseable::assemble] builds the resulting
     /// grammar rule. `auto` is the automaton that was on the main route that was successful, and its
     /// pointers to its children are used to build the output.
     fn assemble(auto: Rawtomaton, lexemes: &[Lexeme<<Self::Lexer as Lexer>::Lexemes>], text: &str) -> Result<(usize, Self), ParceError>;
 }
 
-impl<I: ToString, O: Parser> Parse<O> for I {
+impl<I: ToString, O: Parseable> Parse<O> for I {
     fn parse_max(&self) -> Result<(O, ParseCompletion), ParceError> {
         let text = self.to_string();
         let lexemes = O::default_lexer().lex(&text)?;
@@ -257,7 +265,7 @@ impl<I: ToString, O: Parser> Parse<O> for I {
 #[cfg(test)]
 mod tests {
     use crate as parce;
-    use parce::*;
+    use parce::prelude::*;
 
     macro_rules! parser_error {
         ($input:literal $start:literal $error:ident) => {
