@@ -38,7 +38,6 @@ impl VariantFields {
 
 pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<TokenStream2, ParceMacroError> {
     let mut variants = vec![];
-    let mut other_rules: Vec<String> = vec![];
     for variant in &mut input.variants {
         variants.push(
             VariantInfo {
@@ -65,8 +64,6 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
         );
         variant.discriminant = None;
     }
-    other_rules.sort_unstable();
-    other_rules.dedup();
 
     let enum_ident = input.ident.clone();
     let num_productions = variants.len();
