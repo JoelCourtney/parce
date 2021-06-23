@@ -1,4 +1,4 @@
-//! Parce is parser and lexer generator, where the grammar and the parse tree are the same
+//! Parce a is parser and lexer generator, where the grammar and the parse tree are the same
 //! data structure. It is similar to ANTLR, but the grammar is written in Rust code, not a
 //! special DSL.
 //!
