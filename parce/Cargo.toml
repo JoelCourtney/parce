@@ -1,0 +1,24 @@
+[package]
+name = "parce"
+version = "0.0.0"
+authors = ["Joel Courtney <joel.e.courtney@gmail.com>"]
+edition = "2018"
+description = "A pure-rust parser generator"
+readme = "README.md"
+repository = "https://github.com/JoelCourtney/parce"
+license = "MIT OR Apache-2.0"
+keywords = ["parser"]
+
+[dependencies]
+parce_macros = { path = "../../parce_macros" }
+lazy_static = "1.4.0"
+regex = "1.5.4"
+colored = "2.0.0"
+#hashbrown = "0.11.2"
+typed-arena = "2.0.1"
+shrinkwraprs = "0.3.0"
+tinyvec = { version = "1.2.0", features = ["alloc"] }
+inventory = "0.1.10"
+
+[lib]
+path = "src/lib.rs"
