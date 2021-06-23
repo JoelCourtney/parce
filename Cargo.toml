@@ -1,6 +1,6 @@
 [package]
 name = "parce"
-version = "0.0.0"
+version = "0.0.1"
 authors = ["Joel Courtney <joel.e.courtney@gmail.com>"]
 edition = "2018"
 description = "A pure-rust parser generator"
@@ -11,7 +11,7 @@ keywords = ["parser", "lexer", "grammar", "macro"]
 categories = ["algorithms", "parsing", "text-processing"]
 
 [dependencies]
-parce_macros = { path = "macros", version = "0.0.0" }
+parce_macros = { path = "macros", version = "0.0.1" }
 lazy_static = "1.4.0"
 regex = "1.5.4"
 colored = "2.0.0"
