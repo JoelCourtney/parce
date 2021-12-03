@@ -9,19 +9,21 @@ use shrinkwraprs::Shrinkwrap;
 pub trait Lexer: std::fmt::Display + Debug {
     /// The enum type that the [parce_macros::lexer] attribute macro was applied to. These are
     /// wrapped in the [Lexeme] type in the output.
-    type Lexemes: Eq + Copy + std::fmt::Debug;
+    type Lexemes: Lexeme;
 
     /// Lexes an input string into a vector of lexemes.
-    fn lex(self, s: &str) -> Result<Vec<Lexeme<Self::Lexemes>>, ParceError>;
+    fn lex(self, s: &str) -> Result<Vec<SpannedLexeme<Self::Lexemes>>, ParceError>;
 }
+
+pub trait Lexeme: Debug + Eq + Copy {}
 
 /// Wrapper for the lexeme enum, containing extra information about the location
 /// and length of the lexeme in the string input.
 #[derive(Shrinkwrap, Debug, Default, Eq, PartialEq, Copy, Clone, Hash)]
-pub struct Lexeme<T: Copy + Eq + Debug> {
+pub struct SpannedLexeme<L: Lexeme> {
     /// The lexeme matched in the input. The Lexeme struct is [Shrinkwrapped](shrinkwraprs)
     /// around this field.
-    #[shrinkwrap(main_field)] pub data: T,
+    #[shrinkwrap(main_field)] pub data: L,
 
     /// The index in the input string where the lexeme starts.
     pub start: usize,
@@ -31,9 +33,9 @@ pub struct Lexeme<T: Copy + Eq + Debug> {
 }
 
 /// Can only implement Lexeme<T> == T, because trying to implement T == Lexeme<T> violates
-/// orphan rules. When comparing a wrapped Lexeme to its internal type, put the lexeme first.
-impl<T: Copy + Eq + Debug> PartialEq<T> for Lexeme<T> {
-    fn eq(&self, other: &T) -> bool {
+/// orphan rules. When comparing a spanned lexeme to its internal type, put the spanned version first.
+impl<L: Lexeme> PartialEq<L> for SpannedLexeme<L> {
+    fn eq(&self, other: &L) -> bool {
         self.data == *other
     }
 }
@@ -46,7 +48,7 @@ mod tests {
         ($($lexeme:ident $start:literal $len:literal),+) => {
             Ok(vec![
                 $(
-                    Lexeme {
+                    SpannedLexeme {
                         data: $lexeme,
                         start: $start,
                         len: $len

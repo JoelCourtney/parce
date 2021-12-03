@@ -161,7 +161,7 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
         parce::internal_prelude::inventory::submit! {
             #parser_submission(
                 core::any::TypeId::of::<#enum_ident>(),
-                |route: u32, mut state: u32, lexeme: parce::internal_prelude::Lexeme<<#lexer as parce::internal_prelude::Lexer>::Lexemes>| -> parce::internal_prelude::ArrayVec<[parce::internal_prelude::AutomatonCommand; 3]> {
+                |route: u32, mut state: u32, lexeme: parce::internal_prelude::SpannedLexeme<<#lexer as parce::internal_prelude::Lexer>::Lexemes>| -> parce::internal_prelude::ArrayVec<[parce::internal_prelude::AutomatonCommand; 3]> {
                     use parce::internal_prelude::*;
                     use AutomatonCommand::*;
 
@@ -189,7 +189,7 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
             fn default_lexer() -> Box<Self::Lexer> {
                 Box::new(#lexer::default())
             }
-            fn commands(rule: parce::internal_prelude::Rule, route: u32, mut state: u32, lexeme: parce::internal_prelude::Lexeme<<#lexer as parce::internal_prelude::Lexer>::Lexemes>) -> parce::internal_prelude::ArrayVec<[parce::internal_prelude::AutomatonCommand; 3]> {
+            fn commands(rule: parce::internal_prelude::Rule, route: u32, mut state: u32, lexeme: parce::internal_prelude::SpannedLexeme<<#lexer as parce::internal_prelude::Lexer>::Lexemes>) -> parce::internal_prelude::ArrayVec<[parce::internal_prelude::AutomatonCommand; 3]> {
                 use parce::internal_prelude::*;
                 use AutomatonCommand::*;
 
@@ -231,7 +231,7 @@ pub(crate) fn parser(lexer: syn::Path, mut input: syn::ItemEnum) -> Result<Token
                     panic!("rule number {:?} not found", rule);
                 }
             }
-            fn assemble(auto: parce::internal_prelude::Rawtomaton, lexemes: &[parce::internal_prelude::Lexeme<<#lexer as parce::internal_prelude::Lexer>::Lexemes>], text: &str) -> Result<(usize, Self), parce::error::ParceError> {
+            fn assemble(auto: parce::internal_prelude::Rawtomaton, lexemes: &[parce::internal_prelude::SpannedLexeme<<#lexer as parce::internal_prelude::Lexer>::Lexemes>], text: &str) -> Result<(usize, Self), parce::error::ParceError> {
                 use parce::internal_prelude::*;
 
                 unsafe {

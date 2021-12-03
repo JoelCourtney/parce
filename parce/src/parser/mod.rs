@@ -3,7 +3,7 @@
 
 pub mod automata;
 
-use crate::lexer::{Lexeme, Lexer};
+use crate::lexer::{SpannedLexeme, Lexer};
 use core::any::TypeId as Rule;
 use automata::*;
 use tinyvec::ArrayVec;
@@ -120,7 +120,7 @@ pub trait Parseable: 'static + Sized {
         rule: Rule,
         route: u32,
         state: u32,
-        lexeme: Lexeme<<Self::Lexer as Lexer>::Lexemes>
+        lexeme: SpannedLexeme<<Self::Lexer as Lexer>::Lexemes>
     ) -> ArrayVec<[AutomatonCommand; 3]>;
 
     /// This is a special case of the [Parseable::commands] function, run at the end of the lexemes if
@@ -152,7 +152,7 @@ pub trait Parseable: 'static + Sized {
     /// The last step of the parsing process. After the parse is successful, [Parseable::assemble] builds the resulting
     /// grammar rule. `auto` is the automaton that was on the main route that was successful, and its
     /// pointers to its children are used to build the output.
-    fn assemble(auto: Rawtomaton, lexemes: &[Lexeme<<Self::Lexer as Lexer>::Lexemes>], text: &str) -> Result<(usize, Self), ParceError>;
+    fn assemble(auto: Rawtomaton, lexemes: &[SpannedLexeme<<Self::Lexer as Lexer>::Lexemes>], text: &str) -> Result<(usize, Self), ParceError>;
 }
 
 impl<I: ToString, O: Parseable> Parse<O> for I {

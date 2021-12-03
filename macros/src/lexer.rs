@@ -150,13 +150,15 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
     let submission = format_ident!("{}ParserSubmission", lexer_ident);
 
     Ok(quote! {
-        #[derive(parce_macros::RemoveLexerAttributes, Debug, Eq, PartialEq, Copy, Clone, Hash)]
+        #[derive(parce::internal_prelude::RemoveLexerAttributes, Debug, Eq, PartialEq, Copy, Clone)]
         #[allow(dead_code)]
         #input
 
+        impl parce::internal_prelude::Lexeme for #ident {}
+
         #visibility struct #submission(
             pub core::any::TypeId,
-            pub fn(u32, u32, parce::internal_prelude::Lexeme<#ident>) -> parce::internal_prelude::ArrayVec<[parce::internal_prelude::AutomatonCommand; 3]>,
+            pub fn(u32, u32, parce::internal_prelude::SpannedLexeme<#ident>) -> parce::internal_prelude::ArrayVec<[parce::internal_prelude::AutomatonCommand; 3]>,
             pub fn(u32, u32) -> bool
         );
         parce::internal_prelude::inventory::collect!(#submission);
@@ -183,7 +185,7 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
         impl parce::internal_prelude::Lexer for #lexer_ident {
             type Lexemes = #ident;
 
-            fn lex(mut self, s: &str) -> Result<Vec<parce::internal_prelude::Lexeme<#ident>>, parce::error::ParceError> {
+            fn lex(mut self, s: &str) -> Result<Vec<parce::internal_prelude::SpannedLexeme<#ident>>, parce::error::ParceError> {
                 use parce::internal_prelude::*;
                 use parce::error::{ParceError, ParceErrorInfo};
 
@@ -216,7 +218,7 @@ pub(crate) fn lexer(lexer_ident: Ident, mut input: syn::ItemEnum) -> Result<Toke
                         Some((data, len)) if len > 0 => {
                             match data {
                                 #(#no_skip)|* => result.push(
-                                    Lexeme {
+                                    SpannedLexeme {
                                         data,
                                         start,
                                         len
@@ -356,7 +358,7 @@ impl LexerPattern {
                         tiny_vec!([usize;2])
                     }
                 }, quote! {
-                    static ref #static_ident: regex::Regex = regex::Regex::new(#s)
+                    static ref #static_ident: Regex = Regex::new(#s)
                         .expect(&format!("{} is not a valid regex class", #s));
                 })
             }
