@@ -6,7 +6,7 @@ edition = "2018"
 description = "Proc macros for the parce crate"
 readme = "README.md"
 repository = "https://github.com/JoelCourtney/parce_macros"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0"
 keywords = ["parser"]
 
 [dependencies]
