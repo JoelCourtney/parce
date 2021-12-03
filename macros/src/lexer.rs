@@ -477,7 +477,7 @@ fn match_infinite(matcher: TokenStream2) -> TokenStream2 {
                     *length += start - old_start;
                 }
                 results.extend(lengths);
-                &results[(i+1) as usize ..].sort_unstable();
+                results[(i+1) as usize ..].sort_unstable();
                 dedup_tiny(&mut results);
             }
             i += 1;

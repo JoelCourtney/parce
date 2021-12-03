@@ -2,7 +2,7 @@
 name = "parce_macros"
 version = "0.0.1"
 authors = ["Joel Courtney <joel.e.courtney@gmail.com>"]
-edition = "2018"
+edition = "2021"
 description = "Proc macros for the parce crate"
 readme = "README.md"
 repository = "https://github.com/JoelCourtney/parce_macros"
