@@ -5,38 +5,42 @@ trait Rat {
     type Output;
     type Continue: Rat<Input=Self::Input, Output=Self::Output>;
 
-    fn step(input: Self::Input) -> Step<Self::Output>;
+    fn step(self, input: Self::Input) -> Step<Self::Output,Self::Continue>;
 }
 
-enum Step<O> {
-    Continue,
+enum Step<O,C> {
+    Continue(C),
     Die,
     Success(O)
 }
 
 // generated
 #[inline]
-fn race2<I:Copy,Iter:Iterator<Item=I>,O,Rat0:Rat<Input=I,Output=O>,Rat1:Rat<Input=I,Output=O>>(mut input: Iter) -> Option<O> {
-    let first = input.next().unwrap();
-    match (Rat0::step(first), Rat1::step(first)) {
-        (Step::Continue, Step::Continue) => race2::<_,_,_,Rat0::Continue,Rat1::Continue>(input),
-        (Step::Continue, Step::Die) => race1::<_,_,_,Rat0::Continue>(input),
-        (Step::Die, Step::Continue) => race1::<_,_,_,Rat1::Continue>(input),
+// fn race2<I:Copy,O>(mut input: impl Iterator<Item=I>, rat0: impl Rat<Input=I,Output=O>, rat1: impl Rat<Input=I,Output=O>) -> Option<O> {
+fn race2<O>(input: char, rat0: impl Rat<Input=char,Output=O>, rat1: impl Rat<Input=char,Output=O>) -> Option<O> {
+    // let first = input.next().unwrap();
+    let first = input;
+    match (rat0.step(first), rat1.step(first)) {
+        (Step::Continue(r0), Step::Continue(r1)) => race2(input,r0,r1),
+        (Step::Continue(r0), Step::Die) => race1(input, r0),
+        (Step::Die, Step::Continue(r1)) => race1(input, r1),
         (Step::Die, Step::Die) => {
             None
         }
-        (Step::Success(succ), Step::Continue) => race1::<_,_,_,Rat1::Continue>(input).or(Some(succ)),
-        (Step::Continue, Step::Success(succ)) => race1::<_,_,_,Rat0::Continue>(input).or(Some(succ)),
+        (Step::Success(succ), Step::Continue(r1)) => race1(input, r1).or(Some(succ)),
+        (Step::Continue(r0), Step::Success(succ)) => race1(input, r0).or(Some(succ)),
         (Step::Success(succ), _) => Some(succ),
         (Step::Die, Step::Success(succ)) => Some(succ)
     }
 }
 
 #[inline]
-fn race1<I:Copy,Iter:Iterator<Item=I>,O,Rat0:Rat<Input=I,Output=O>>(mut input: Iter) -> Option<O> {
-    let first = input.next().unwrap();
-    match Rat0::step(first) {
-        Step::Continue => race1::<_,_,_,Rat0::Continue>(input),
+// fn race1<I:Copy,O>(mut input: impl Iterator<Item=I>, rat0: impl Rat<Input=I,Output=O>) -> Option<O> {
+fn race1<O>(input: char, rat0: impl Rat<Input=char,Output=O>) -> Option<O> {
+    // let first = input.next().unwrap();
+    let first = input;
+    match rat0.step(first) {
+        Step::Continue(r0) => race1(input, r0),
         Step::Die => None,
         Step::Success(succ) => Some(succ)
     }
@@ -55,7 +59,7 @@ impl<I:Copy,O> Rat for CannotContinue<I,O> {
     type Continue = CannotContinue<I,O>;
 
     #[inline]
-    fn step(_: I) -> Step<O> {
+    fn step(self, _: I) -> Step<O,CannotContinue<I,O>> {
         unreachable!()
     }
 }
@@ -68,9 +72,9 @@ impl Rat for FindsAB0 {
     type Continue = FindsAB1;
 
     #[inline]
-    fn step(input: char) -> Step<FinderResult> {
+    fn step(self, input: char) -> Step<FinderResult,FindsAB1> {
         if input == 'a' {
-            Step::Continue
+            Step::Continue(FindsAB1)
         } else {
             Step::Die
         }
@@ -82,7 +86,7 @@ impl Rat for FindsAB1 {
     type Continue = CannotContinue<char,FinderResult>;
 
     #[inline]
-    fn step(input: char) -> Step<FinderResult> {
+    fn step(self, input: char) -> Step<FinderResult,Self::Continue> {
         if input == 'b' {
             Step::Success(FinderResult::FoundAB)
         } else {
@@ -100,9 +104,9 @@ impl Rat for FindsAAB0 {
     type Continue = FindsAAB1;
 
     #[inline]
-    fn step(input: char) -> Step<FinderResult> {
+    fn step(self, input: char) -> Step<FinderResult,Self::Continue> {
         if input == 'a' {
-            Step::Continue
+            Step::Continue(FindsAAB1)
         } else {
             Step::Die
         }
@@ -114,9 +118,9 @@ impl Rat for FindsAAB1 {
     type Continue = FindsAAB2;
 
     #[inline]
-    fn step(input: char) -> Step<FinderResult> {
+    fn step(self, input: char) -> Step<FinderResult,Self::Continue> {
         if input == 'a' {
-            Step::Continue
+            Step::Continue(FindsAAB2)
         } else {
             Step::Die
         }
@@ -128,11 +132,65 @@ impl Rat for FindsAAB2 {
     type Continue = CannotContinue<char,FinderResult>;
 
     #[inline]
-    fn step(input: char) -> Step<FinderResult> {
-        if input == 'b' {
+    fn step(self, input: char) -> Step<FinderResult,Self::Continue> {
+        if input == 'a' {
             Step::Success(FinderResult::FoundAAB)
         } else {
             Step::Die
+        }
+    }
+}
+
+enum FindsEither<L:Rat,R:Rat<Input=L::Input,Output=L::Output>> {
+    Both(L,R),
+    Left(L),
+    Right(R)
+}
+
+impl<L:Rat,R:Rat<Input=L::Input,Output=L::Output>> Rat for FindsEither<L,R> {
+    type Input = L::Input;
+    type Output = ();
+    type Continue = FindsEither<L::Continue, R::Continue>;
+
+    #[inline]
+    fn step(self, input: L::Input) -> Step<(),FindsEither<L::Continue,R::Continue>> {
+        match self {
+            Self::Both(rat0, rat1) => {
+                match (rat0.step(input), rat1.step(input)) {
+                    (Step::Continue(rl), Step::Continue(rr)) => {
+                        Step::Continue(FindsEither::Both(rl, rr))
+                    }
+                    (Step::Die, Step::Continue(rr)) => {
+                        Step::Continue(FindsEither::Right(rr))
+                    }
+                    (Step::Continue(rl), Step::Die) => {
+                        Step::Continue(FindsEither::Left(rl))
+                    }
+                    (Step::Die, Step::Die) => Step::Die,
+                    (Step::Success(_), _) => {
+                        Step::Success(())
+                    }
+                    (_, Step::Success(_)) => Step::Success(())
+                }
+            }
+            Self::Left(rat0) => {
+                match rat0.step(input) {
+                    Step::Continue(rl) => {
+                        Step::Continue(FindsEither::Left(rl))
+                    }
+                    Step::Die => Step::Die,
+                    Step::Success(_) => Step::Success(())
+                }
+            }
+            Self::Right(rat0) => {
+                match rat0.step(input) {
+                    Step::Continue(rr) => {
+                        Step::Continue(FindsEither::Right(rr))
+                    }
+                    Step::Die => Step::Die,
+                    Step::Success(_) => Step::Success(())
+                }
+            }
         }
     }
 }
@@ -142,13 +200,15 @@ impl Rat for FindsAAB2 {
 mod tests {
     use super::*;
     use logos::Logos;
+    use std::time::Instant;
+
 
     #[derive(Logos, Debug, PartialEq, Eq)]
     enum LogosFinder {
         #[token("ab")]
         AB,
 
-        #[token("aab")]
+        #[token("aaa")]
         AAB,
 
         #[error]
@@ -157,10 +217,15 @@ mod tests {
 
     #[test]
     fn finders() {
-        let mut input = "aab";
+        let mut input = String::new();
+        let stdin = std::io::stdin(); // We get `Stdin` here.
+        stdin.read_line(&mut input).unwrap();
+        let input_char = input.chars().next().unwrap();
+        let start = Instant::now();
         for _ in 0..1000000000 {
-            assert_eq!(race2::<_, _, _, FindsAB0, FindsAAB0>("ab".chars()), Some(FinderResult::FoundAB))
-            // assert_eq!(LogosFinder::lexer(input).next(), Some(LogosFinder::AAB))
+            assert_eq!(race2(input_char, FindsAB0, FindsAAB0), Some(FinderResult::FoundAAB));
+            // assert_eq!(LogosFinder::lexer(&input).next(), Some(LogosFinder::AAB))
         }
+        dbg!(Instant::now() - start);
     }
 }
