@@ -539,7 +539,7 @@ mod tests {
 
         Multiple {told: Option<BasicGrammar>, me: Vec<OrGrammar>} = "G told? A me+",
         Boxed {the: Option<Box<BareNamedGrammar>>} = "B A the?"
-}
+    }
 
     #[test]
     fn bare_named_grammar() {

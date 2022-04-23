@@ -16,31 +16,27 @@ enum Step<O,C> {
 
 // generated
 #[inline]
-// fn race2<I:Copy,O>(mut input: impl Iterator<Item=I>, rat0: impl Rat<Input=I,Output=O>, rat1: impl Rat<Input=I,Output=O>) -> Option<O> {
-fn race2<O>(input: char, rat0: impl Rat<Input=char,Output=O>, rat1: impl Rat<Input=char,Output=O>) -> Option<O> {
-    // let first = input.next().unwrap();
-    let first = input;
+fn race2<I:Copy,O>(input: &[I], rat0: impl Rat<Input=I,Output=O>, rat1: impl Rat<Input=I,Output=O>) -> Option<O> {
+    let first = input[0];
     match (rat0.step(first), rat1.step(first)) {
-        (Step::Continue(r0), Step::Continue(r1)) => race2(input,r0,r1),
-        (Step::Continue(r0), Step::Die) => race1(input, r0),
-        (Step::Die, Step::Continue(r1)) => race1(input, r1),
+        (Step::Continue(r0), Step::Continue(r1)) => race2(&input[1..],r0,r1),
+        (Step::Continue(r0), Step::Die) => race1(&input[1..], r0),
+        (Step::Die, Step::Continue(r1)) => race1(&input[1..], r1),
         (Step::Die, Step::Die) => {
             None
         }
-        (Step::Success(succ), Step::Continue(r1)) => race1(input, r1).or(Some(succ)),
-        (Step::Continue(r0), Step::Success(succ)) => race1(input, r0).or(Some(succ)),
+        (Step::Success(succ), Step::Continue(r1)) => race1(&input[1..], r1).or(Some(succ)),
+        (Step::Continue(r0), Step::Success(succ)) => race1(&input[1..], r0).or(Some(succ)),
         (Step::Success(succ), _) => Some(succ),
         (Step::Die, Step::Success(succ)) => Some(succ)
     }
 }
 
 #[inline]
-// fn race1<I:Copy,O>(mut input: impl Iterator<Item=I>, rat0: impl Rat<Input=I,Output=O>) -> Option<O> {
-fn race1<O>(input: char, rat0: impl Rat<Input=char,Output=O>) -> Option<O> {
-    // let first = input.next().unwrap();
-    let first = input;
+fn race1<I:Copy,O>(input: &[I], rat0: impl Rat<Input=I,Output=O>) -> Option<O> {
+    let first = input[0];
     match rat0.step(first) {
-        Step::Continue(r0) => race1(input, r0),
+        Step::Continue(r0) => race1(&input[1..], r0),
         Step::Die => None,
         Step::Success(succ) => Some(succ)
     }
@@ -220,11 +216,11 @@ mod tests {
         let mut input = String::new();
         let stdin = std::io::stdin(); // We get `Stdin` here.
         stdin.read_line(&mut input).unwrap();
-        let input_char = input.chars().next().unwrap();
         let start = Instant::now();
-        for _ in 0..1000000000 {
-            assert_eq!(race2(input_char, FindsAB0, FindsAAB0), Some(FinderResult::FoundAAB));
-            // assert_eq!(LogosFinder::lexer(&input).next(), Some(LogosFinder::AAB))
+        let chars: Vec<char> = input.chars().collect();
+        for _ in 0..100000000 {
+            // assert_eq!(race1(&chars, FindsEither::Both(FindsAB0, FindsAAB0)), Some(()));
+            assert_eq!(LogosFinder::lexer(&input).next(), Some(LogosFinder::AAB))
         }
         dbg!(Instant::now() - start);
     }
