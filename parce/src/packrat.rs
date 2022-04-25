@@ -45,7 +45,8 @@ fn race1<I:Copy,O>(input: &[I], rat0: impl Rat<Input=I,Output=O>) -> Option<O> {
 #[derive(PartialEq, Eq, Debug)]
 enum FinderResult {
     FoundAB,
-    FoundAAB
+    FoundAAB,
+    FoundBAB
 }
 
 struct CannotContinue<I,O>(PhantomData<(I,O)>);
@@ -129,7 +130,7 @@ impl Rat for FindsAAB2 {
 
     #[inline]
     fn step(self, input: char) -> Step<FinderResult,Self::Continue> {
-        if input == 'a' {
+        if input == 'b' {
             Step::Success(FinderResult::FoundAAB)
         } else {
             Step::Die
@@ -190,6 +191,47 @@ impl<L:Rat,R:Rat<Input=L::Input,Output=L::Output>> Rat for FindsEither<L,R> {
         }
     }
 }
+// ba*b
+// baac
+fn dumb_parser(chars: &[char]) -> Option<FinderResult> {
+    let mut index = 0;
+    match chars[index] {
+        'a' => loop {
+            index += 1;
+            break match chars[index] {
+                'a' => loop {
+                    index += 1;
+                    break match chars[index] {
+                        'b' => Some(FinderResult::FoundAAB),
+                        _ => None
+                    }
+                }
+                'b' => Some(FinderResult::FoundAB),
+                _ => None
+            }
+        }
+        'b' => loop {
+            index += 1;
+            break match chars[index] {
+                'a' => { continue }
+                'b' => Some(FinderResult::FoundBAB),
+                _ => None
+            }
+        }
+        _ => None
+    }
+    //match chars[index] {
+    //         'b' => loop {
+    //             index += 1;
+    //             break match chars[index] {
+    //                 'a' => { continue }
+    //                 'b' => Some(FinderResult::FoundBASB),
+    //                 _ => None
+    //             }
+    //         }
+    //         _ => None
+    //     }
+}
 
 
 #[cfg(test)]
@@ -201,11 +243,14 @@ mod tests {
 
     #[derive(Logos, Debug, PartialEq, Eq)]
     enum LogosFinder {
-        #[token("ab")]
-        AB,
+        // #[token("ab")]
+        // AB,
+        //
+        // #[token("aab")]
+        // AAB,
 
-        #[token("aaa")]
-        AAB,
+        #[regex("ba*b")]
+        BAB,
 
         #[error]
         Error
@@ -218,9 +263,11 @@ mod tests {
         stdin.read_line(&mut input).unwrap();
         let start = Instant::now();
         let chars: Vec<char> = input.chars().collect();
-        for _ in 0..100000000 {
+        for _ in 0..1000000000 {
+            // assert_eq!(race2(&chars, FindsAB0, FindsAAB0), Some(FinderResult::FoundAAB))
             // assert_eq!(race1(&chars, FindsEither::Both(FindsAB0, FindsAAB0)), Some(()));
-            assert_eq!(LogosFinder::lexer(&input).next(), Some(LogosFinder::AAB))
+            assert_eq!(LogosFinder::lexer(&input).next(), Some(LogosFinder::BAB));
+            // assert_eq!(dumb_parser(&chars), Some(FinderResult::FoundBAB));
         }
         dbg!(Instant::now() - start);
     }
