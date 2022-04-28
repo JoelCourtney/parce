@@ -5,5 +5,5 @@ enum BasicLexeme {
     AAB = l!(
         | 'a' +
         | 'b'
-    )
+    ),
 }

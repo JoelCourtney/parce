@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum LexerAst {
@@ -9,5 +9,5 @@ pub enum LexerAst {
     Plus(Box<LexerAst>),
     Question(Box<LexerAst>),
     Dot,
-    Or(Vec<LexerAst>)
+    Or(Vec<LexerAst>),
 }

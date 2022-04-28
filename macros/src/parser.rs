@@ -1,7 +1,7 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub enum ParserAst {
     Lexeme(String),
-    Plus(Box<ParserAst>)
+    Plus(Box<ParserAst>),
 }

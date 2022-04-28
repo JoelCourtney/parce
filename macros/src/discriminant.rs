@@ -1,10 +1,10 @@
-use syn::buffer::Cursor;
-use syn::parse::{Parse, ParseStream};
 use crate::LexerAst;
 use crate::ParserAst;
-use proc_macro2::{Delimiter, TokenTree};
 use proc_macro::TokenStream;
+use proc_macro2::{Delimiter, TokenTree};
 use proc_macro_error::{abort, abort_call_site};
+use syn::buffer::Cursor;
+use syn::parse::{Parse, ParseStream};
 
 #[derive(Debug)]
 enum LexerDiscriminantLexeme {
@@ -15,7 +15,7 @@ enum LexerDiscriminantLexeme {
     Plus,
     Question,
     Dot,
-    Pipe
+    Pipe,
 }
 
 impl Parse for LexerAst {
@@ -25,38 +25,47 @@ impl Parse for LexerAst {
             let mut lexemes = vec![];
 
             while let Some((tt, next)) = cursor.token_tree() {
-                lexemes.push(
-                    (match &tt {
+                lexemes.push((
+                    match &tt {
                         TokenTree::Literal(lit) => {
                             let as_string = lit.to_string();
                             if as_string.starts_with('"') && as_string.ends_with('"')
-                                || as_string.len() == 3 && as_string.starts_with('\'') && as_string.ends_with('\'') {
-                                LexerDiscriminantLexeme::Literal(as_string[1..as_string.len()-1].to_string())
+                                || as_string.len() == 3
+                                    && as_string.starts_with('\'')
+                                    && as_string.ends_with('\'')
+                            {
+                                LexerDiscriminantLexeme::Literal(
+                                    as_string[1..as_string.len() - 1].to_string(),
+                                )
                             } else {
-                                abort!(tt.span(), "Unsupported literal; must be string or char literal");
+                                abort!(
+                                    tt.span(),
+                                    "Unsupported literal; must be string or char literal"
+                                );
                             }
                         }
-                        TokenTree::Ident(ident) => LexerDiscriminantLexeme::Ident(ident.to_string()),
-                        TokenTree::Punct(punct) => {
-                            match punct.as_char() {
-                                '*' => LexerDiscriminantLexeme::Star,
-                                '+' => LexerDiscriminantLexeme::Plus,
-                                '?' => LexerDiscriminantLexeme::Question,
-                                '.' => LexerDiscriminantLexeme::Dot,
-                                '|' => LexerDiscriminantLexeme::Pipe,
-                                _ => abort!(tt.span(), "Unsupported punctuation")
-                            }
+                        TokenTree::Ident(ident) => {
+                            LexerDiscriminantLexeme::Ident(ident.to_string())
                         }
-                        TokenTree::Group(group) => {
-                            match group.delimiter() {
-                                Delimiter::Parenthesis => LexerDiscriminantLexeme::Group(group.stream().clone().into()),
-                                Delimiter::Bracket => todo!(),
-                                Delimiter::Brace => todo!(),
-                                Delimiter::None => abort!(group.clone(), "how")
+                        TokenTree::Punct(punct) => match punct.as_char() {
+                            '*' => LexerDiscriminantLexeme::Star,
+                            '+' => LexerDiscriminantLexeme::Plus,
+                            '?' => LexerDiscriminantLexeme::Question,
+                            '.' => LexerDiscriminantLexeme::Dot,
+                            '|' => LexerDiscriminantLexeme::Pipe,
+                            _ => abort!(tt.span(), "Unsupported punctuation"),
+                        },
+                        TokenTree::Group(group) => match group.delimiter() {
+                            Delimiter::Parenthesis => {
+                                LexerDiscriminantLexeme::Group(group.stream().clone().into())
                             }
-                        }
-                    }, tt.clone())
-                );
+                            Delimiter::Bracket => todo!(),
+                            Delimiter::Brace => todo!(),
+                            Delimiter::None => abort!(group.clone(), "how"),
+                        },
+                    },
+                    tt.clone(),
+                ));
                 cursor = next;
             }
 
@@ -65,7 +74,9 @@ impl Parse for LexerAst {
             Ok((lexemes, Cursor::empty()))
         })?;
 
-        fn parse_lexer_lexemes(lexemes: &[(LexerDiscriminantLexeme, TokenTree)]) -> syn::Result<LexerAst> {
+        fn parse_lexer_lexemes(
+            lexemes: &[(LexerDiscriminantLexeme, TokenTree)],
+        ) -> syn::Result<LexerAst> {
             let mut index = 0;
             let mut group = vec![];
             loop {
@@ -73,10 +84,10 @@ impl Parse for LexerAst {
                     Some((LexerDiscriminantLexeme::Pipe, tt)) => {
                         if !group.is_empty() {
                             abort!(
-                            tt, "| must also be used at the start of an alternation";
-                            help = "Try inserting a | in front of the first alternative.";
-                            example = "Example:\n      Instead of  l!('a' | 'b')\n      Use         l!(| 'a' | 'b')\n                     ^"
-                        )
+                                tt, "| must also be used at the start of an alternation";
+                                help = "Try inserting a | in front of the first alternative.";
+                                example = "Example:\n      Instead of  l!('a' | 'b')\n      Use         l!(| 'a' | 'b')\n                     ^"
+                            )
                         }
                         let mut alternatives = vec![];
                         let mut last_pipe = 0;
@@ -86,7 +97,7 @@ impl Parse for LexerAst {
                                 last_pipe = i;
                             }
                         }
-                        alternatives.push(parse_lexer_lexemes(&lexemes[last_pipe+1 ..])?);
+                        alternatives.push(parse_lexer_lexemes(&lexemes[last_pipe + 1..])?);
                         index = lexemes.len();
                         group.push(LexerAst::Or(alternatives));
                     }
@@ -94,15 +105,21 @@ impl Parse for LexerAst {
                         match lexemes.get(index + 1) {
                             Some((LexerDiscriminantLexeme::Star, _)) => {
                                 index += 2;
-                                group.push(LexerAst::Star(Box::new(LexerAst::Literal(lit.to_string()))));
+                                group.push(LexerAst::Star(Box::new(LexerAst::Literal(
+                                    lit.to_string(),
+                                ))));
                             }
                             Some((LexerDiscriminantLexeme::Plus, _)) => {
                                 index += 2;
-                                group.push(LexerAst::Plus(Box::new(LexerAst::Literal(lit.to_string()))));
+                                group.push(LexerAst::Plus(Box::new(LexerAst::Literal(
+                                    lit.to_string(),
+                                ))));
                             }
                             Some((LexerDiscriminantLexeme::Question, _)) => {
                                 index += 2;
-                                group.push(LexerAst::Question(Box::new(LexerAst::Literal(lit.to_string()))));
+                                group.push(LexerAst::Question(Box::new(LexerAst::Literal(
+                                    lit.to_string(),
+                                ))));
                             }
                             _ => {
                                 index += 1;
@@ -114,15 +131,21 @@ impl Parse for LexerAst {
                         match lexemes.get(index + 1) {
                             Some((LexerDiscriminantLexeme::Star, _)) => {
                                 index += 2;
-                                group.push(LexerAst::Star(Box::new(LexerAst::Ident(ident.to_string()))));
+                                group.push(LexerAst::Star(Box::new(LexerAst::Ident(
+                                    ident.to_string(),
+                                ))));
                             }
                             Some((LexerDiscriminantLexeme::Plus, _)) => {
                                 index += 2;
-                                group.push(LexerAst::Plus(Box::new(LexerAst::Ident(ident.to_string()))));
+                                group.push(LexerAst::Plus(Box::new(LexerAst::Ident(
+                                    ident.to_string(),
+                                ))));
                             }
                             Some((LexerDiscriminantLexeme::Question, _)) => {
                                 index += 2;
-                                group.push(LexerAst::Question(Box::new(LexerAst::Ident(ident.to_string()))));
+                                group.push(LexerAst::Question(Box::new(LexerAst::Ident(
+                                    ident.to_string(),
+                                ))));
                             }
                             _ => {
                                 index += 1;
@@ -151,29 +174,33 @@ impl Parse for LexerAst {
                             }
                         }
                     }
-                    Some((LexerDiscriminantLexeme::Star, tt)) => abort!(tt, "Operator must come after literal or group"),
-                    Some((LexerDiscriminantLexeme::Plus, tt)) => abort!(tt, "Operator must come after literal or group"),
-                    Some((LexerDiscriminantLexeme::Question, tt)) => abort!(tt, "Operator must come after literal or group"),
-                    Some((LexerDiscriminantLexeme::Dot, _)) => {
-                        match lexemes.get(index + 1) {
-                            Some((LexerDiscriminantLexeme::Star, _)) => {
-                                index += 2;
-                                group.push(LexerAst::Star(Box::new(LexerAst::Dot)));
-                            }
-                            Some((LexerDiscriminantLexeme::Plus, _)) => {
-                                index += 2;
-                                group.push(LexerAst::Plus(Box::new(LexerAst::Dot)));
-                            }
-                            Some((LexerDiscriminantLexeme::Question, _)) => {
-                                index += 2;
-                                group.push(LexerAst::Question(Box::new(LexerAst::Dot)));
-                            }
-                            _ => {
-                                index += 1;
-                                group.push(LexerAst::Dot);
-                            }
-                        }
+                    Some((LexerDiscriminantLexeme::Star, tt)) => {
+                        abort!(tt, "Operator must come after literal or group")
                     }
+                    Some((LexerDiscriminantLexeme::Plus, tt)) => {
+                        abort!(tt, "Operator must come after literal or group")
+                    }
+                    Some((LexerDiscriminantLexeme::Question, tt)) => {
+                        abort!(tt, "Operator must come after literal or group")
+                    }
+                    Some((LexerDiscriminantLexeme::Dot, _)) => match lexemes.get(index + 1) {
+                        Some((LexerDiscriminantLexeme::Star, _)) => {
+                            index += 2;
+                            group.push(LexerAst::Star(Box::new(LexerAst::Dot)));
+                        }
+                        Some((LexerDiscriminantLexeme::Plus, _)) => {
+                            index += 2;
+                            group.push(LexerAst::Plus(Box::new(LexerAst::Dot)));
+                        }
+                        Some((LexerDiscriminantLexeme::Question, _)) => {
+                            index += 2;
+                            group.push(LexerAst::Question(Box::new(LexerAst::Dot)));
+                        }
+                        _ => {
+                            index += 1;
+                            group.push(LexerAst::Dot);
+                        }
+                    },
                     None => break,
                 }
             }
