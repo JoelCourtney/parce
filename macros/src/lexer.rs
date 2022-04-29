@@ -4,8 +4,8 @@ use proc_macro2::{Ident, TokenStream};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use proc_macro_error::{abort, abort_call_site, emit_warning};
-use quote::{format_ident, ToTokens};
-use crate::helper::{get_mode_list};
+use quote::{format_ident, quote, ToTokens};
+use crate::helper::{get_attr_equals_idents};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum LexerAst {
@@ -43,7 +43,7 @@ struct LexemeVariant {
 
 pub fn process_lexer(_lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStream {
     if let syn::Data::Enum(ref mut lexer_enum) = ast.data {
-        let default_mode = helper::get_attr_ident_argument("default_mode", &mut ast.attrs);
+        let default_mode = helper::get_attr_equals_ident("default_mode", &mut ast.attrs);
         let mut populated_modes = HashSet::new();
         let mut set_modes = HashSet::new();
         let mut current_modes = vec![format_ident!("Default")];
@@ -51,14 +51,14 @@ pub fn process_lexer(_lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStr
             let ident = variant.ident.clone();
             let skip = helper::get_attr("skip", &mut variant.attrs).is_some();
             let frag = helper::get_attr("frag", &mut variant.attrs).is_some();
-            let modes = if let Some(list) = get_mode_list(&mut variant.attrs) {
+            let modes = if let Some(list) = get_attr_equals_idents("mode", &mut variant.attrs) {
                 current_modes = list.clone();
                 populated_modes.extend(list.clone());
                 list
             } else {
                 current_modes.clone()
             };
-            let set_mode = helper::get_attr_ident_argument("set_mode", &mut variant.attrs);
+            let set_mode = helper::get_attr_equals_ident("set_mode", &mut variant.attrs);
             if let Some(ident) = &set_mode {
                 set_modes.insert(ident.clone());
             }
@@ -112,7 +112,7 @@ pub fn process_lexer(_lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStr
 
         dbg!(variants);
 
-        todo!()
+        quote!{ #ast }
     } else {
         abort_call_site!("Lexer macro must be applied to an enum of lexemes, even if you only need one variant");
     }

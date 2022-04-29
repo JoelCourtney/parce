@@ -1,8 +1,10 @@
 use proc_macro_error::abort;
 use std::str::FromStr;
 use proc_macro2::{Ident, TokenTree};
+use quote::format_ident;
 use syn::{Attribute, Token};
 use syn::parse::Parse;
+use syn::punctuated::Punctuated;
 
 pub(crate) fn get_attr(s: &str, attrs: &mut Vec<Attribute>) -> Option<Attribute> {
     let mut index = 0;
@@ -17,38 +19,38 @@ pub(crate) fn get_attr(s: &str, attrs: &mut Vec<Attribute>) -> Option<Attribute>
     None
 }
 
-pub(crate) fn get_attr_ident_argument(s: &str, attrs: &mut Vec<Attribute>) -> Option<Ident> {
+pub(crate) fn get_attr_equals_idents(s: &str, attrs: &mut Vec<Attribute>) -> Option<Vec<Ident>> {
     get_attr(s, attrs).map(|attr| {
-        let mut tokens: Vec<TokenTree> = attr.tokens.clone().into_iter().collect();
-        if tokens.len() != 1 {
-            abort!(attr.tokens, "Expected only an identifier (without quotes)");
-        }
-        match tokens.remove(0) {
-            TokenTree::Ident(ident) => ident,
-            _ => abort!(attr.tokens, "Expected an identifier (without quotes)")
+        let tokens: Vec<_> = attr.tokens.clone().into_iter().collect();
+        match tokens.get(0) {
+            Some(proc_macro2::TokenTree::Punct(p)) if p.as_char() == '=' => {
+                let mut idents = vec![];
+                let mut expect_ident = true;
+                for token in &tokens[1..] {
+                    match token {
+                        proc_macro2::TokenTree::Ident(ident) if expect_ident => {
+                            expect_ident = false;
+                            idents.push(ident.clone());
+                        },
+                        proc_macro2::TokenTree::Punct(p) if !expect_ident && p.as_char() == ',' => { expect_ident = true; }
+                        _ => abort!(attr, "Expected a list of identifiers: #[{s} = Ident1, Ident2]")
+                    }
+                }
+                idents
+            }
+            _ => abort!(attr, "Expected `= identifier` after attribute name"),
         }
     })
-
 }
 
-pub(crate) fn get_mode_list(attrs: &mut Vec<Attribute>) -> Option<Vec<Ident>> {
-    let attr = get_attr("mode", attrs)?;
-    match attr.parse_meta() {
-        Ok(syn::Meta::List(syn::MetaList { nested, .. })) => {
-            let mut list = vec![];
-            for nest in nested {
-                match nest {
-                    syn::NestedMeta::Meta(syn::Meta::Path(ref path)) => match path.get_ident() {
-                        Some(id) => list.push(id.clone()),
-                        _ => abort!(nest, "Modes must be a list of identifiers (without quotes)"),
-                    },
-                    _ => abort!(nest, "Modes must be a list of identifiers (without quotes)"),
-                }
-            }
-            Some(list)
+pub(crate) fn get_attr_equals_ident(s: &str, attrs: &mut Vec<Attribute>) -> Option<Ident> {
+    get_attr_equals_idents(s, attrs).map(|mut vec| {
+        if vec.len() > 1 {
+            abort!(vec[1], "Expected only a single identifier");
+        } else {
+            vec.remove(0)
         }
-        _ => abort!(attr, "Modes must be a list of identifiers. Omit the attribute if you only have one mode."),
-    }
+    })
 }
 
 pub(crate) fn get_ast<T: FromStr + Parse>(variant: &mut syn::Variant, new_discriminant: Option<(Token![=], syn::Expr)>, type_message: &str) -> T
