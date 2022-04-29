@@ -1,4 +1,4 @@
-use crate::*;
+use crate::lexer;
 
 #[lexer(BasicLexer)]
 #[default_mode = Hello]
@@ -6,7 +6,7 @@ enum BasicLexeme {
     #[mode = Hello]
     #[set_mode = Zxcv]
     #[skip]
-    AAB = d!(
+    AAB = p!(
         | 'a' +
         | 'b'
     ),
