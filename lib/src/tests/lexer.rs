@@ -1,8 +1,8 @@
-use parce_macros::l;
-// #[derive(Lexer)]
-// #[lexer_name(BasicLexer)]
+use crate::*;
+
+#[lexer(BasicLexer)]
 enum BasicLexeme {
-    AAB = l!(
+    AAB = d!(
         | 'a' +
         | 'b'
     ),

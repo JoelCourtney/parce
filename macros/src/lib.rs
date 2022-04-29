@@ -1,30 +1,30 @@
 mod discriminant;
+mod helper;
 mod lexer;
 mod parser;
 
 use proc_macro::TokenStream;
-use proc_macro_error::proc_macro_error;
-use quote::quote;
-use syn::parse_macro_input;
+use proc_macro_error::{abort, proc_macro_error};
+use syn::{parse_macro_input};
 
 use lexer::LexerAst;
 use parser::ParserAst;
 
 const DISCRIMINANT_TAG: &'static str = "###PARCE-DISCRIMINANT:";
 
-#[proc_macro_error]
 #[proc_macro]
-pub fn l(input: TokenStream) -> TokenStream {
-    let ast = parse_macro_input!(input as LexerAst);
-    let text = format!("{DISCRIMINANT_TAG}{}", serde_json::to_string(&ast).unwrap());
-    println!("{text}");
-    (quote! { #text }).into()
+pub fn d(input: TokenStream) -> TokenStream {
+    input
 }
 
 #[proc_macro_error]
-#[proc_macro]
-pub fn p(input: TokenStream) -> TokenStream {
-    let ast = parse_macro_input!(input as ParserAst);
-    let text = format!("{DISCRIMINANT_TAG}{}", serde_json::to_string(&ast).unwrap());
-    (quote! { #text }).into()
+#[proc_macro_attribute]
+pub fn lexer(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as syn::Meta);
+    let lexer_ident = match helper::get_lexer_ident(&args) {
+        Some(id) => id,
+        None => abort!(args, "lexer name must be specified")
+    };
+    let ast = parse_macro_input!(input as syn::DeriveInput);
+    lexer::process_lexer(lexer_ident, ast).into()
 }
