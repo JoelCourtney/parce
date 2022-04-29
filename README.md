@@ -1,8 +1,8 @@
 [![crates.io](https://img.shields.io/crates/v/parce.svg)](https://crates.io/crates/parce)
 [![downloads](https://img.shields.io/crates/d/parce)](https://crates.io/crates/parce)
 [![docs](https://img.shields.io/docsrs/parce)](https://docs.rs/parce/)
-[![Dependency status](https://deps.rs/repo/github/orium/cargo-rdme/status.svg)](https://deps.rs/repo/github/orium/cargo-rdme)
-[![Github stars](https://img.shields.io/github/stars/JoelCourtney/parce.svg?logo=github)](https://github.com/orium/cargo-rdme/stargazers)
+[![Dependency status](https://deps.rs/repo/github/JoelCourtney/parce/status.svg)](https://deps.rs/repo/github/JoelCourtney/parce)
+[![Github stars](https://img.shields.io/github/stars/JoelCourtney/parce.svg?logo=github)](https://github.com/JoelCourtney/parce/stargazers)
 [![License](https://img.shields.io/crates/l/parce.svg)](./LICENSE.md)
 
 <!-- cargo-rdme start -->
