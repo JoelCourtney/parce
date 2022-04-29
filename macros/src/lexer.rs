@@ -1,13 +1,12 @@
 use std::collections::HashSet;
-use crate::{helper, DISCRIMINANT_TAG};
+use crate::helper;
 use proc_macro2::{Ident, TokenStream};
-use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use proc_macro_error::{abort, abort_call_site, emit_warning};
 use quote::{format_ident, quote, ToTokens};
 use crate::helper::{get_attr_equals_idents};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug)]
 pub enum LexerAst {
     Literal(String),
     Ident(String),
@@ -20,18 +19,15 @@ pub enum LexerAst {
 }
 
 impl FromStr for LexerAst {
-    type Err = serde_json::Error;
+    type Err = ();
 
-    fn from_str(s: &str) -> serde_json::Result<Self> {
-        Ok(if s.starts_with(DISCRIMINANT_TAG) {
-            serde_json::from_str(&s[DISCRIMINANT_TAG.len()..])?
-        } else {
-            LexerAst::Literal(s.to_string())
-        })
+    fn from_str(s: &str) -> Result<Self, ()> {
+        Ok(LexerAst::Literal(s.to_string()))
     }
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct LexemeVariant {
     ident: Ident,
     skip: bool,
@@ -107,6 +103,7 @@ pub fn process_lexer(_lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStr
             emit_warning!(mode, "Mode has members but is never activated.");
         }
         for mode in unpopulated_modes {
+            dbg!("asdf");
             emit_warning!(mode, "Mode is activated but has no members.");
         }
 

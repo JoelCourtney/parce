@@ -10,8 +10,6 @@ use syn::{parse_macro_input};
 use lexer::LexerAst;
 use parser::ParserAst;
 
-const DISCRIMINANT_TAG: &'static str = "###PARCE-DISCRIMINANT:";
-
 #[proc_macro_error]
 #[proc_macro_attribute]
 pub fn lexer(args: TokenStream, input: TokenStream) -> TokenStream {

@@ -1,10 +1,8 @@
 use proc_macro_error::abort;
 use std::str::FromStr;
-use proc_macro2::{Ident, TokenTree};
-use quote::format_ident;
+use proc_macro2::{Ident};
 use syn::{Attribute, Token};
 use syn::parse::Parse;
-use syn::punctuated::Punctuated;
 
 pub(crate) fn get_attr(s: &str, attrs: &mut Vec<Attribute>) -> Option<Attribute> {
     let mut index = 0;

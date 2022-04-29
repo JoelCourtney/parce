@@ -1,6 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize)]
+#[allow(dead_code)]
 pub enum ParserAst {
     Lexeme(String),
     Plus(Box<ParserAst>),
