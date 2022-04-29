@@ -1,3 +1,7 @@
+//! Parce macros
+
+// #![doc(test(attr(deny(warnings))))]
+
 mod discriminant;
 mod helper;
 mod lexer;
