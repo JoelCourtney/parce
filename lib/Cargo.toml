@@ -17,4 +17,4 @@ parce_macros = { path = "../macros", version = "0.0.1" }
 logos = "0.12.1"
 
 [features]
-stream = []
+async = []

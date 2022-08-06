@@ -50,7 +50,8 @@ impl LexerAst {
             }
             Dot => Tree::Match {
                 arms: vec![
-                    (SliceMatcher::any(1), Box::new(success))
+                    (SliceMatcher::any(1), Box::new(success)),
+                    (SliceMatcher::Else, Box::new(failure))
                 ],
                 length: 1
             },
@@ -193,7 +194,8 @@ pub fn process_lexer(lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStre
                 type Input = char;
                 type Output = #tokens_ident;
 
-                fn lex<'a>(&mut self, input: &'a [char]) -> Result<parce::Lexeme<'a, Self::Input, Self::Output>, usize> {
+                #[inline]
+                fn lex<'a>(&mut self, input: &'a [char]) -> Result<parce::Lexeme<'a, char, Self::Output>, usize> {
                     #tree
                 }
             }

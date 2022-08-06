@@ -25,6 +25,7 @@
 //! use parce::{lexer};
 //!
 //! #[lexer(Lexer)]
+//! #[derive(PartialEq, Eq)]
 //! enum Token {
 //!     // Each of the following match a single specific character
 //!     ShiftRight = '>',
@@ -38,16 +39,11 @@
 //!
 //!     // Matches spaces, tabs, newlines, and carriage returns, and ignores them in the output.
 //!     #[skip]
-//!     Whitespace = p!(
-//!         | ' '
-//!         | "\t"
-//!         | "\n"
-//!         | "\r"
-//!     )
-//!
-//!     // TODO: ignore comments
+//!     IgnoreElse = p!(.)
 //! }
+//!
 //! fn main() {
+//!     let input = "[ hello there ] >>.[]";
 //!     assert_eq!(2, 2);
 //! }
 //! ```
@@ -80,7 +76,7 @@ pub struct Lexeme<'a, I: Eq, T: Token> {
     pub token: T
 }
 
-impl<I: Eq, T: Token + Eq> PartialEq<T> for Lexeme<'_, I, T> {
+impl<I: Eq, T: Token + PartialEq> PartialEq<T> for Lexeme<'_, I, T> {
     fn eq(&self, other: &T) -> bool {
         self.token == *other
     }

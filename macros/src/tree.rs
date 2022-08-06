@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Tree {
     Match {
         arms: Vec<(SliceMatcher, Box<Tree>)>,
@@ -13,24 +13,27 @@ pub enum Tree {
     Err
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SliceMatcher {
     If(Vec<CharMatcher>),
     Else
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CharMatcher {
     Literal(char),
     Any
 }
 
 impl Tree {
-    fn to_tokens_indexed(&self, previous_index: impl ToTokens + Clone, index: impl ToTokens + Clone) -> impl ToTokens {
+    fn to_tokens_indexed(&self, index: impl ToTokens + Clone) -> impl ToTokens {
         match self {
             Tree::Match { arms, length} => {
                 let (matchers, results): (Vec<_>, Vec<_>) = arms.iter().map(|(matcher, tree)| {
-                    (matcher, tree.to_tokens_indexed(index.clone(), quote! {#index + #length}))
+                    match matcher {
+                        SliceMatcher::If(_) => (matcher, tree.to_tokens_indexed(quote! {#index + #length})),
+                        SliceMatcher::Else => (matcher, tree.to_tokens_indexed(quote! { #index }))
+                    }
                 }).unzip();
                 quote! {
                     match input.get(#index..#index + #length) {
@@ -54,7 +57,7 @@ impl Tree {
             }
             Tree::Err => {
                 quote! {
-                    Err(#previous_index)
+                    Err(#index)
                 }
             }
         }
@@ -82,16 +85,7 @@ impl Tree {
                     left_length
                 };
                 let mut arms: Vec<_> = left_arms.into_iter().chain(right_arms.into_iter()).collect();
-                arms.sort_by(|l, r| l.0.cmp(&r.0));
-                let mut i = 0;
-                while i < arms.len() - 1 {
-                    if arms[i].0 == arms[i+1].0 {
-                        let left = arms.remove(i);
-                        let right = arms.remove(i);
-                        arms.insert(i, (left.0, Box::new(left.1.merge(*right.1))));
-                    }
-                    i += 1;
-                }
+                Self::combine_arms(&mut arms);
                 Tree::Match { arms, length }
             }
             (
@@ -125,7 +119,7 @@ impl Tree {
     pub(crate) fn squash(&mut self) {
         match self {
             Tree::Match { arms, length } => {
-                let length_option = arms.iter().map(|(_, tree)| tree.match_length()).min();
+                let length_option = arms.iter().filter_map(|(_, tree)| tree.squashable_length()).min();
                 length_option.map(|squash_length| {
                     if squash_length > 0 {
                         *arms = arms.iter().cloned().flat_map(|(matcher, tree)| {
@@ -143,18 +137,33 @@ impl Tree {
                         *length += squash_length;
                     }
                 });
-                for (_, tree) in arms {
+                for (_, tree) in arms.iter_mut() {
                     tree.squash();
                 }
+                Self::combine_arms(arms);
             }
             _ => {}
         }
     }
 
-    fn match_length(&self) -> usize {
+    fn squashable_length(&self) -> Option<usize> {
         match self {
-            Tree::Match { length, .. } => *length,
-            Tree::Ok(_) | Tree::Err => 0,
+            Tree::Match { length, arms } => {
+                let mut squashable = true;
+                for (matcher, tree) in arms {
+                    match (matcher, tree.as_ref()) {
+                        (SliceMatcher::Else, Tree::Ok(_)) => squashable = false,
+                        _ => {}
+                    }
+                }
+                if squashable {
+                    Some(*length)
+                } else {
+                    Some(0)
+                }
+            }
+            Tree::Ok(_) => Some(0),
+            Tree::Err => None
             // _ => todo!("match length")
         }
     }
@@ -175,6 +184,20 @@ impl Tree {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn combine_arms(arms: &mut Vec<(SliceMatcher, Box<Tree>)>) {
+        arms.sort_by(|l, r| l.0.cmp(&r.0));
+        let mut i = 0;
+        while i < arms.len() - 1 {
+            if arms[i].0 == arms[i+1].0 {
+                let left = arms.remove(i);
+                let right = arms.remove(i);
+                arms.insert(i, (left.0, Box::new(left.1.merge(*right.1))));
+            } else {
+                i += 1;
+            }
         }
     }
 }
@@ -213,6 +236,7 @@ impl SliceMatcher {
                 new_vec.extend(other_vec);
                 SliceMatcher::If(new_vec)
             }
+            (_, SliceMatcher::Else) => SliceMatcher::Else,
             _ => unreachable!("cannot concatenate SliceMatcher::Else")
         }
     }
@@ -220,7 +244,7 @@ impl SliceMatcher {
 
 impl ToTokens for Tree {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        self.to_tokens_indexed(quote! {0}, quote! {0}).to_tokens(tokens);
+        self.to_tokens_indexed(quote! {0}).to_tokens(tokens);
     }
 }
 
@@ -230,7 +254,7 @@ impl ToTokens for SliceMatcher {
             SliceMatcher::Else => quote! { _ },
             SliceMatcher::If(chars) => {
                 if chars.iter().all(|m| m == &CharMatcher::Any) {
-                    quote! { Some(_) }
+                    quote! { Some([..]) }
                 } else {
                     quote! { Some([#(#chars), *]) }
                 }

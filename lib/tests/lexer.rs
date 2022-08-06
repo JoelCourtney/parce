@@ -4,16 +4,17 @@ use logos::Logos;
 #[lexer(MyLexer)]
 #[derive(Debug, PartialEq, Eq)]
 enum MyToken {
-    AB = "ab",
-    AAB = p!("aa"  'b')
+    AB = "asdf",
+    AAB = p!("asdfzxcv")
+
 }
 
 #[derive(Logos, Debug, PartialEq, Eq)]
 enum LogosFinder {
-    #[token("ab")]
+    #[token("asdf")]
     AB,
 
-    #[token("aab")]
+    #[regex("asdfzxcv")]
     AAB,
 
     #[error]
@@ -25,14 +26,13 @@ fn test() {
     let mut input = String::new();
     let stdin = std::io::stdin();
     stdin.read_line(&mut input).unwrap();
-    let start = std::time::Instant::now();
     let chars: Vec<char> = input.chars().collect();
+    let start = std::time::Instant::now();
     for _ in 0..100000000 {
-        // assert_eq!(LogosFinder::lexer(&input).next(), Some(LogosFinder::AB));
-        assert_eq!(MyToken::lexer().lex(&chars).unwrap(), Lexeme {
-            span: &chars[..2],
-            token: MyToken::AB
-        });
+        unsafe {
+            // assert_eq!(LogosFinder::lexer(&input).next().unwrap_unchecked(), LogosFinder::AAB);
+            assert_eq!(MyToken::lexer().lex(&chars).unwrap_unchecked(), MyToken::AAB);
+        }
     }
     dbg!(std::time::Instant::now() - start);
 }
