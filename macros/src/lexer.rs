@@ -50,11 +50,15 @@ impl LexerAst {
             }
             Dot => Tree::Match {
                 arms: vec![
-                    (SliceMatcher::any(1), Box::new(success)),
+                    (SliceMatcher::any(1), Box::new(success.deprioritize())),
                     (SliceMatcher::Else, Box::new(failure))
                 ],
                 length: 1
             },
+            Question(ast) => {
+                let matched_branch = ast.into_tree(success.clone().deprioritize(), failure);
+                matched_branch.merge(success.deprioritize())
+            }
             _ => todo!()
         }
     }
@@ -162,7 +166,7 @@ pub fn process_lexer(lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStre
         let mut tree = Tree::Err;
         for variant in variants {
             let variant_ident = variant.ident;
-            tree = tree.merge(variant.discriminant.into_tree(Tree::Ok(quote! {#tokens_ident::#variant_ident}), Tree::Err));
+            tree = tree.merge(variant.discriminant.into_tree(Tree::Ok { result: quote! {#tokens_ident::#variant_ident}, priority: 0}, Tree::Err));
         }
         tree.squash();
         tree.prune_err();

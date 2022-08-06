@@ -9,7 +9,10 @@ pub enum Tree {
     },
     // Loop(Box<Tree>),
     // Break(Box<Tree>),
-    Ok(TokenStream),
+    Ok {
+        result: TokenStream,
+        priority: usize
+    },
     Err
 }
 
@@ -47,11 +50,11 @@ impl Tree {
             }
             // Tree::Loop(_) => {todo!()}
             // Tree::Break(_) => todo!(),
-            Tree::Ok(token) => {
+            Tree::Ok { result, .. } => {
                 quote! {
                     Ok(parce::Lexeme {
                         span: &input[0..#index],
-                        token: #token
+                        token: #result
                     })
                 }
             }
@@ -90,28 +93,48 @@ impl Tree {
             }
             (
                 mut tree @Tree::Match { .. },
-                Tree::Ok(token)
+                new@Tree::Ok{..}
             ) | (
-                Tree::Ok(token),
+                new@Tree::Ok{..},
                 mut tree@Tree::Match { .. }
             ) => {
-                tree.override_failure(token);
+                tree.fallback(new, true);
                 tree
             }
             (Tree::Err, tree) | (tree, Tree::Err) => tree,
-            _ => todo!()
+            (Tree::Ok{ priority: self_priority, result: self_result }, Tree::Ok{ priority: other_priority, result: other_result }) => {
+                if self_priority > other_priority {
+                    Tree::Ok {
+                        result: other_result,
+                        priority: other_priority
+                    }
+                } else {
+                    Tree::Ok {
+                        result: self_result,
+                        priority: other_priority
+                    }
+                }
+            }
+            _ => todo!("merge")
         }
     }
 
-    fn override_failure(&mut self, token: TokenStream) {
+    fn fallback(&mut self, other: Tree, same_depth: bool) {
         match self {
             Tree::Match { ref mut arms, .. } => {
-                for (_, tree) in arms {
-                    tree.override_failure(token.clone());
+                for (matcher, tree) in arms {
+                    tree.fallback(other.clone(), *matcher == SliceMatcher::Else && same_depth);
                 }
             }
-            Tree::Ok(_) => {}
-            Tree::Err => *self = Tree::Ok(token),
+            Tree::Ok { priority, .. } => {
+                match other {
+                    Tree::Ok { priority: new_priority, .. } if same_depth && dbg!(new_priority) < dbg!(*priority) => {
+                        *self = other;
+                    }
+                    _ => {}
+                }
+            }
+            Tree::Err => *self = other,
             // _ => todo!("asdf")
         }
     }
@@ -152,7 +175,7 @@ impl Tree {
                 let mut squashable = true;
                 for (matcher, tree) in arms {
                     match (matcher, tree.as_ref()) {
-                        (SliceMatcher::Else, Tree::Ok(_)) => squashable = false,
+                        (SliceMatcher::Else, Tree::Ok{..}) => squashable = false,
                         _ => {}
                     }
                 }
@@ -162,7 +185,7 @@ impl Tree {
                     Some(0)
                 }
             }
-            Tree::Ok(_) => Some(0),
+            Tree::Ok{..} => Some(0),
             Tree::Err => None
             // _ => todo!("match length")
         }
@@ -184,6 +207,20 @@ impl Tree {
                 }
             }
             _ => {}
+        }
+    }
+
+    pub(crate) fn deprioritize(self) -> Self {
+        match self {
+            Tree::Match { mut arms, length } => {
+                arms = arms.into_iter().map(|(matcher, tree)| (matcher, Box::new(tree.deprioritize()))).collect();
+                Tree::Match { arms, length }
+            }
+            Tree::Ok { result, priority } => Tree::Ok {
+                result,
+                priority: priority + 1
+            },
+            Tree::Err => self
         }
     }
 
