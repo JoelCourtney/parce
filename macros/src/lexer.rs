@@ -5,6 +5,7 @@ use std::str::FromStr;
 use proc_macro_error::{abort, abort_call_site, emit_warning};
 use quote::{format_ident, quote, ToTokens};
 use crate::helper::{get_attr_equals_idents};
+use crate::tree::{SliceMatcher, Tree};
 
 #[derive(Debug)]
 pub enum LexerAst {
@@ -26,31 +27,69 @@ impl FromStr for LexerAst {
     }
 }
 
+impl LexerAst {
+    fn into_tree(self, success: Tree, failure: Tree) -> Tree {
+        use LexerAst::*;
+
+        match self {
+            Literal(lit) => {
+                Tree::Match {
+                    length: lit.len(),
+                    arms: vec![
+                        (SliceMatcher::literal(lit), Box::new(success)),
+                        (SliceMatcher::Else, Box::new(failure))
+                    ]
+                }
+            },
+            Group(asts) => {
+                let mut result = success;
+                for ast in asts.into_iter().rev() {
+                    result = ast.into_tree(result, failure.clone());
+                }
+                result
+            }
+            Dot => Tree::Match {
+                arms: vec![
+                    (SliceMatcher::any(1), Box::new(success))
+                ],
+                length: 1
+            },
+            _ => todo!()
+        }
+    }
+}
+
 #[derive(Debug)]
 #[allow(dead_code)]
-struct LexemeVariant {
+struct TokenVariant {
     ident: Ident,
     skip: bool,
     frag: bool,
-    modes: Vec<Ident>,
+    modes: VariantModes,
     set_mode: Option<Ident>,
     discriminant: LexerAst
 }
 
-pub fn process_lexer(_lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStream {
+#[derive(Clone, Debug)]
+enum VariantModes {
+    Explicit(Vec<Ident>),
+    Implicit
+}
+
+pub fn process_lexer(lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStream {
     if let syn::Data::Enum(ref mut lexer_enum) = ast.data {
         let default_mode = helper::get_attr_equals_ident("default_mode", &mut ast.attrs);
         let mut populated_modes = HashSet::new();
         let mut set_modes = HashSet::new();
-        let mut current_modes = vec![format_ident!("Default")];
-        let variants: Vec<_> = lexer_enum.variants.iter_mut().map(|variant| {
+        let mut current_modes = VariantModes::Implicit;
+        let mut variants: Vec<TokenVariant> = lexer_enum.variants.iter_mut().map(|variant| {
             let ident = variant.ident.clone();
             let skip = helper::get_attr("skip", &mut variant.attrs).is_some();
             let frag = helper::get_attr("frag", &mut variant.attrs).is_some();
             let modes = if let Some(list) = get_attr_equals_idents("mode", &mut variant.attrs) {
-                current_modes = list.clone();
+                current_modes = VariantModes::Explicit(list.clone());
                 populated_modes.extend(list.clone());
-                list
+                current_modes.clone()
             } else {
                 current_modes.clone()
             };
@@ -72,8 +111,8 @@ pub fn process_lexer(_lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStr
             } else {
                 None
             };
-            let discriminant = helper::get_ast(variant, new_discriminant, "Lexeme pattern must be a literal char, literal str, or an invocation of the l!() macro");
-            LexemeVariant {
+            let discriminant = helper::get_ast(variant, new_discriminant, "Lexeme pattern must be a literal char, literal str, or an invocation of the p!() macro");
+            TokenVariant {
                 ident,
                 skip,
                 frag,
@@ -83,34 +122,83 @@ pub fn process_lexer(_lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStr
             }
         }).collect();
 
-        let _default_mode = if let Some(def) = default_mode {
+        let default_mode = if let Some(def) = default_mode {
             set_modes.insert(def.clone());
             def
         } else {
             if !populated_modes.is_empty() || !set_modes.is_empty() {
-                abort_call_site!("Default mode must be specified in multi-modal lexers");
+                abort_call_site!("Default mode must be specified in modal lexers");
             } else {
                 let default = format_ident!("Default");
                 populated_modes.insert(default.clone());
                 set_modes.insert(default.clone());
+                for variant in &mut variants {
+                    variant.modes = VariantModes::Explicit(vec![default.clone()])
+                }
                 default
             }
         };
 
-        let unset_modes: Vec<&Ident> = populated_modes.difference(&set_modes).collect();
-        let unpopulated_modes: Vec<&Ident> = set_modes.difference(&populated_modes).collect();
-        for mode in unset_modes {
+        for mode in populated_modes.difference(&set_modes) {
             emit_warning!(mode, "Mode has members but is never activated.");
         }
-        for mode in unpopulated_modes {
-            dbg!("asdf");
+        for mode in set_modes.difference(&populated_modes) {
             emit_warning!(mode, "Mode is activated but has no members.");
         }
 
-        dbg!(variants);
+        let all_modes: Vec<_> = set_modes.union(&populated_modes).collect();
 
-        quote!{ #ast }
+        if all_modes.len() > 1 {
+            for variant in &variants {
+                if let VariantModes::Implicit = variant.modes {
+                    abort!(variant.ident, "You must explicitly declare the modes for all variants in modal lexers");
+                }
+            }
+        }
+
+        let tokens_ident = ast.ident.clone();
+
+        let mut tree = Tree::Err;
+        for variant in variants {
+            let variant_ident = variant.ident;
+            tree = tree.merge(variant.discriminant.into_tree(Tree::Ok(quote! {#tokens_ident::#variant_ident}), Tree::Err));
+        }
+        tree.squash();
+        tree.prune_err();
+
+        quote!{
+            #ast
+
+            impl parce::Token for #tokens_ident {
+                type Lexer = #lexer_ident;
+
+                fn lexer() -> Self::Lexer {
+                    #lexer_ident::default()
+                }
+            }
+
+            enum #lexer_ident {
+                #(
+                    #all_modes,
+                )*
+            }
+
+            impl Default for #lexer_ident {
+                fn default() -> Self {
+                    Self::#default_mode
+                }
+            }
+
+            impl parce::Lexer for #lexer_ident {
+                type Input = char;
+                type Output = #tokens_ident;
+
+                fn lex<'a>(&mut self, input: &'a [char]) -> Result<parce::Lexeme<'a, Self::Input, Self::Output>, usize> {
+                    #tree
+                }
+            }
+        }
     } else {
-        abort_call_site!("Lexer macro must be applied to an enum of lexemes, even if you only need one variant");
+        abort_call_site!("Lexer macro must be applied to an enum of tokens, even if you only need one variant");
     }
 }

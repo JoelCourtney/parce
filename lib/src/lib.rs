@@ -25,7 +25,7 @@
 //! use parce::{lexer};
 //!
 //! #[lexer(Lexer)]
-//! enum Lexeme {
+//! enum Token {
 //!     // Each of the following match a single specific character
 //!     ShiftRight = '>',
 //!     ShiftLeft = '<',
@@ -69,5 +69,26 @@
 #[doc(inline)]
 pub use parce_macros::lexer;
 
-#[cfg(test)]
-mod tests;
+pub trait Token {
+    type Lexer: Lexer;
+    fn lexer() -> Self::Lexer;
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Lexeme<'a, I: Eq, T: Token> {
+    pub span: &'a [I],
+    pub token: T
+}
+
+impl<I: Eq, T: Token + Eq> PartialEq<T> for Lexeme<'_, I, T> {
+    fn eq(&self, other: &T) -> bool {
+        self.token == *other
+    }
+}
+
+pub trait Lexer: Default {
+    type Input: Eq;
+    type Output: Token;
+
+    fn lex<'a>(&mut self, input: &'a [Self::Input]) -> Result<Lexeme<'a, Self::Input, Self::Output>, usize>;
+}

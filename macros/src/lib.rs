@@ -6,6 +6,7 @@ mod discriminant;
 mod helper;
 mod lexer;
 mod parser;
+mod tree;
 
 use proc_macro::TokenStream;
 use proc_macro_error::{abort, proc_macro_error};
@@ -14,6 +15,9 @@ use syn::{parse_macro_input};
 use lexer::LexerAst;
 use parser::ParserAst;
 
+/// Apply this macro to an enum of lexemes to create a lexer that generates them.
+///
+/// TODO
 #[proc_macro_error]
 #[proc_macro_attribute]
 pub fn lexer(args: TokenStream, input: TokenStream) -> TokenStream {

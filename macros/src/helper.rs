@@ -77,10 +77,13 @@ where <T as FromStr>::Err: std::fmt::Debug {
         Some((
             _,
             syn::Expr::Macro(syn::ExprMacro { mac, .. })
-             )) => {
+             )) if mac.path.segments.len() == 1 && mac.path.segments.first().unwrap().ident.to_string() == "p" => {
             syn::parse(mac.tokens.into()).unwrap()
         }
-        _ => {
+        Some((_, discriminant)) => {
+            abort!(discriminant, type_message);
+        }
+        None => {
             abort!(variant, type_message);
         }
     };
