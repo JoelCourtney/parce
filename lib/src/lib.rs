@@ -62,6 +62,8 @@
 
 // #![doc(test(attr(deny(warnings))))]
 
+#[cfg(feature = "logos")]
+pub mod compatability;
 pub mod iterator;
 
 #[doc(inline)]
