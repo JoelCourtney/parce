@@ -22,7 +22,7 @@
 //! details, see the [`lexer`](crate::lexer) and [`parser`](crate::parser) documentation.
 //!
 //! ```
-//! use parce::{lexer};
+//! use parce::prelude::*;
 //!
 //! #[lexer(Lexer)]
 //! #[derive(PartialEq, Eq)]
@@ -62,28 +62,21 @@
 
 // #![doc(test(attr(deny(warnings))))]
 
-#[cfg(feature = "logos")]
 pub mod compatability;
+
+pub mod prelude;
 pub mod iterator;
 
-#[doc(inline)]
-pub use parce_macros::lexer;
-
-use crate::iterator::{BufferedIterator, IteratorSourceIterator, SliceSourceIterator};
-
-pub trait Token {
-    type Lexer: Lexer;
-    fn lexer() -> Self::Lexer;
-}
+use crate::iterator::{BufferedIterator};
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct Lexeme<T: Token> {
+pub struct Lexeme<T> {
     pub start: usize,
     pub length: usize,
     pub token: T
 }
 
-impl<T: Token + PartialEq> PartialEq<T> for Lexeme<T> {
+impl<T: PartialEq> PartialEq<T> for Lexeme<T> {
     fn eq(&self, other: &T) -> bool {
         self.token == *other
     }
@@ -91,22 +84,8 @@ impl<T: Token + PartialEq> PartialEq<T> for Lexeme<T> {
 
 pub trait Lexer: Default {
     type Input: Eq + Copy;
-    type Output: Token;
+    type Output;
 
     fn lex_from_slice(&mut self, input: &[Self::Input]) -> Option<Lexeme<Self::Output>>;
     fn lex_from_buffered_iter<Iter: Iterator<Item=Self::Input>>(&mut self, input: &mut BufferedIterator<Self::Input, Iter>) -> Option<Lexeme<Self::Output>>;
 }
-
-pub trait SliceToLexerExt {
-    type Item;
-    fn lex<'a, L: Lexer<Input=Self::Item>>(self) -> SliceSourceIterator<'a, L> where Self: 'a + Sized;
-}
-
-pub trait IteratorToLexerExt: Iterator {
-    fn lex<L: Lexer<Input=Self::Item>>(self) -> IteratorSourceIterator<L, Self> where Self: Sized, Self::Item: Copy + Default;
-}
-
-pub trait StrToLexerExt {
-    fn lex<'a, L: Lexer<Input=char>>(self) -> IteratorSourceIterator<L, std::str::Chars<'a>> where Self: 'a;
-}
-

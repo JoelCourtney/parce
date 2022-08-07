@@ -1,15 +1,13 @@
-use std::iter::Map;
-use std::ops::Range;
-use ::logos::{Logos, SpannedIter};
-use crate::{Lexeme};
+use crate::Lexeme;
 
 pub trait ConvertToParceExt: Iterator {
-    type Iterator: Iterator;
+    type Iterator: Iterator<Item=Lexeme<Self::Item>>;
     fn to_parce(self) -> Self::Iterator;
 }
 
-impl<'source, T: Logos<'source>> ConvertToParceExt for ::logos::Lexer<'source, T> {
-    type Iterator = Map<SpannedIter<'source, T>, fn((T, Range<usize>)) -> Lexeme<T>>;
+#[cfg(feature = "logos")]
+impl<'source, T: logos::Logos<'source>> ConvertToParceExt for logos::Lexer<'source, T> {
+    type Iterator = std::iter::Map<logos::SpannedIter<'source, T>, fn((T, std::ops::Range<usize>)) -> Lexeme<T>>;
 
     fn to_parce(self) -> Self::Iterator {
         self.spanned().map(|(token, span)| Lexeme {
@@ -21,6 +19,7 @@ impl<'source, T: Logos<'source>> ConvertToParceExt for ::logos::Lexer<'source, T
 }
 
 #[cfg(test)]
+#[cfg(feature = "logos")]
 mod tests {
     use ::logos::*;
     use crate::Lexeme;

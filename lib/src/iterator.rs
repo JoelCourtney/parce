@@ -1,6 +1,19 @@
 use std::collections::VecDeque;
 use std::str::Chars;
-use crate::{IteratorToLexerExt, Lexeme, Lexer, SliceToLexerExt, StrToLexerExt};
+use crate::{Lexeme, Lexer};
+
+pub trait SliceToLexerExt {
+    type Item;
+    fn lex<'a, L: Lexer<Input=Self::Item>>(self) -> SliceSourceIterator<'a, L> where Self: 'a + Sized;
+}
+
+pub trait IteratorToLexerExt: Iterator {
+    fn lex<L: Lexer<Input=Self::Item>>(self) -> IteratorSourceIterator<L, Self> where Self: Sized, Self::Item: Copy + Default;
+}
+
+pub trait StrToLexerExt {
+    fn lex<'a, L: Lexer<Input=char>>(self) -> IteratorSourceIterator<L, std::str::Chars<'a>> where Self: 'a;
+}
 
 pub struct IteratorSourceIterator<L: crate::Lexer<Input=I::Item>, I: Iterator> where I::Item: Copy {
     pub(crate) lexer: L,

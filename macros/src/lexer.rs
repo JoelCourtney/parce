@@ -177,14 +177,6 @@ pub fn process_lexer(lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStre
         quote!{
             #ast
 
-            impl parce::Token for #tokens_ident {
-                type Lexer = #lexer_ident;
-
-                fn lexer() -> Self::Lexer {
-                    #lexer_ident::default()
-                }
-            }
-
             enum #lexer_ident {
                 #(
                     #all_modes,
@@ -197,7 +189,7 @@ pub fn process_lexer(lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStre
                 }
             }
 
-            impl parce::Lexer for #lexer_ident {
+            impl parce::prelude::Lexer for #lexer_ident {
                 type Input = char;
                 type Output = #tokens_ident;
 
