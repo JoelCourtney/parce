@@ -28,18 +28,28 @@ pub enum CharMatcher {
     Any
 }
 
+#[derive(Copy, Clone)]
+pub enum ItemSource {
+    Slice,
+    BufferedIter
+}
+
 impl Tree {
-    fn to_tokens_indexed(&self, index: impl ToTokens + Clone) -> impl ToTokens {
+    pub(crate) fn to_tokens(&self, index: impl ToTokens + Clone, source: ItemSource) -> impl ToTokens {
         match self {
             Tree::Match { arms, length} => {
                 let (matchers, results): (Vec<_>, Vec<_>) = arms.iter().map(|(matcher, tree)| {
                     match matcher {
-                        SliceMatcher::If(_) => (matcher, tree.to_tokens_indexed(quote! {#index + #length})),
-                        SliceMatcher::Else => (matcher, tree.to_tokens_indexed(quote! { #index }))
+                        SliceMatcher::If(_) => (matcher, tree.to_tokens(quote! {#index + #length}, source)),
+                        SliceMatcher::Else => (matcher, tree.to_tokens(quote! { #index }, source))
                     }
                 }).unzip();
+                let match_expr = match source {
+                    ItemSource::Slice => quote! {input.get(#index..#index+#length)},
+                    ItemSource::BufferedIter => quote! {input.next_chunk::<#length>()}
+                };
                 quote! {
-                    match input.get(#index..#index + #length) {
+                    match #match_expr {
                         #(
                             #matchers => {
                                 #results
@@ -52,16 +62,15 @@ impl Tree {
             // Tree::Break(_) => todo!(),
             Tree::Ok { result, .. } => {
                 quote! {
-                    Ok(parce::Lexeme {
-                        span: &input[0..#index],
+                    Some(parce::Lexeme {
+                        start: 0,
+                        length: #index,
                         token: #result
                     })
                 }
             }
             Tree::Err => {
-                quote! {
-                    Err(#index)
-                }
+                quote! { None }
             }
         }
     }
@@ -115,7 +124,6 @@ impl Tree {
                     }
                 }
             }
-            _ => todo!("merge")
         }
     }
 
@@ -276,12 +284,6 @@ impl SliceMatcher {
             (_, SliceMatcher::Else) => SliceMatcher::Else,
             _ => unreachable!("cannot concatenate SliceMatcher::Else")
         }
-    }
-}
-
-impl ToTokens for Tree {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        self.to_tokens_indexed(quote! {0}).to_tokens(tokens);
     }
 }
 

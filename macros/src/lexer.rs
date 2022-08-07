@@ -5,7 +5,7 @@ use std::str::FromStr;
 use proc_macro_error::{abort, abort_call_site, emit_warning};
 use quote::{format_ident, quote, ToTokens};
 use crate::helper::{get_attr_equals_idents};
-use crate::tree::{SliceMatcher, Tree};
+use crate::tree::{ItemSource, SliceMatcher, Tree};
 
 #[derive(Debug)]
 pub enum LexerAst {
@@ -171,6 +171,9 @@ pub fn process_lexer(lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStre
         tree.squash();
         tree.prune_err();
 
+        let tree_for_slice = tree.to_tokens(quote! {0}, ItemSource::Slice);
+        let tree_for_buffered_iter = tree.to_tokens(quote! {0}, ItemSource::BufferedIter);
+
         quote!{
             #ast
 
@@ -199,8 +202,13 @@ pub fn process_lexer(lexer_ident: Ident, mut ast: syn::DeriveInput) -> TokenStre
                 type Output = #tokens_ident;
 
                 #[inline]
-                fn lex<'a>(&mut self, input: &'a [char]) -> Result<parce::Lexeme<'a, char, Self::Output>, usize> {
-                    #tree
+                fn lex_from_slice(&mut self, input: &[char]) -> Option<parce::Lexeme<Self::Output>> {
+                    #tree_for_slice
+                }
+
+                #[inline]
+                fn lex_from_buffered_iter<Iter: Iterator<Item=Self::Input>>(&mut self, input: &mut parce::iterator::BufferedIterator<Self::Input, Iter>) -> Option<parce::Lexeme<Self::Output>> {
+                    #tree_for_buffered_iter
                 }
             }
         }
