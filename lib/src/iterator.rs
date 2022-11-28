@@ -1,126 +1,111 @@
 use std::collections::VecDeque;
 use std::str::Chars;
-use crate::{Lexeme, Lexer};
+use crate::{Parce, Sentence};
 
-pub trait SliceToLexerExt {
+pub trait SliceToParceExt {
     type Item;
-    fn lex<'a, L: Lexer<Input=Self::Item>>(self) -> SliceSourceIterator<'a, L> where Self: 'a + Sized;
+    fn lex<'a, P: Parce<Input=Self::Item>>(self) -> SliceSourceIterator<'a, P> where Self: 'a + Sized;
 }
 
-pub trait IteratorToLexerExt: Iterator {
-    fn lex<L: Lexer<Input=Self::Item>>(self) -> IteratorSourceIterator<L, Self> where Self: Sized, Self::Item: Copy + Default;
+pub trait IteratorToParceExt: Iterator {
+    fn lex<P: Parce<Input=Self::Item>>(self) -> IteratorSourceIterator<P, Self> where Self: Sized, Self::Item: Copy + Default;
 }
 
-pub trait StrToLexerExt {
-    fn lex<'a, L: Lexer<Input=char>>(self) -> IteratorSourceIterator<L, std::str::Chars<'a>> where Self: 'a;
+pub trait StrToParceExt {
+    fn lex<'a, P: Parce<Input=char>>(self) -> IteratorSourceIterator<P, std::str::Chars<'a>> where Self: 'a;
 }
 
-pub struct IteratorSourceIterator<L: crate::Lexer<Input=I::Item>, I: Iterator> where I::Item: Copy {
-    pub(crate) lexer: L,
-    pub(crate) iter: BufferedIterator<L::Input, I>
+pub struct IteratorSourceIterator<P: Parce<Input=I::Item>, I: Iterator> where I::Item: Copy {
+    pub(crate) processor: P,
+    pub(crate) iter: BufferedIterator<P::Input, I>
 }
 
-impl<L: crate::Lexer, I: Iterator<Item=L::Input>> Iterator for IteratorSourceIterator<L, I> {
-    type Item = Lexeme<L::Output>;
+impl<P: Parce, I: Iterator<Item=P::Input>> Iterator for IteratorSourceIterator<P, I> {
+    type Item = Sentence<P::Output>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.lexer.lex_from_buffered_iter(&mut self.iter)
+        self.processor.process_buffered_iter(&mut self.iter)
     }
 }
 
-impl<T: Iterator> IteratorToLexerExt for T where T::Item: Copy + Default {
-    fn lex<L: Lexer<Input=T::Item>>(self) -> IteratorSourceIterator<L, Self> {
+impl<T: Iterator> IteratorToParceExt for T where T::Item: Copy + Default {
+    fn lex<P: Parce<Input=T::Item>>(self) -> IteratorSourceIterator<P, Self> {
         IteratorSourceIterator {
-            lexer: L::default(),
+            processor: P::default(),
             iter: BufferedIterator::new(self)
         }
     }
 }
 
-impl StrToLexerExt for &str {
-    fn lex<'a, L: Lexer<Input=char>>(self) -> IteratorSourceIterator<L, Chars<'a>> where Self: 'a {
+impl StrToParceExt for &str {
+    fn lex<'a, P: Parce<Input=char>>(self) -> IteratorSourceIterator<P, Chars<'a>> where Self: 'a {
         IteratorSourceIterator {
-            lexer: L::default(),
+            processor: P::default(),
             iter: BufferedIterator::new(self.chars())
         }
     }
 }
 
-impl<I> SliceToLexerExt for &[I] {
+impl<I> SliceToParceExt for &[I] {
     type Item = I;
 
-    fn lex<'a, L: Lexer<Input=I>>(self) -> SliceSourceIterator<'a, L> where Self: 'a {
+    fn lex<'a, P: Parce<Input=I>>(self) -> SliceSourceIterator<'a, P> where Self: 'a {
         SliceSourceIterator {
-            lexer: L::default(),
+            processor: P::default(),
             slice: self,
             index: 0
         }
     }
 }
 
-pub struct SliceSourceIterator<'a, L: Lexer> {
-    pub(crate) lexer: L,
-    pub(crate) slice: &'a [L::Input],
+pub struct SliceSourceIterator<'a, P: Parce> {
+    pub(crate) processor: P,
+    pub(crate) slice: &'a [P::Input],
     pub(crate) index: usize
 }
 
-impl<L: Lexer> Iterator for SliceSourceIterator<'_, L> {
-    type Item = Lexeme<L::Output>;
+impl<P: Parce> Iterator for SliceSourceIterator<'_, P> {
+    type Item = Sentence<P::Output>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let lexeme = self.lexer.lex_from_slice(&self.slice[self.index..]);
-        if let Some(ref l) = lexeme {
-            self.index += l.length;
+        let result = self.processor.process_slice(&self.slice[self.index..]);
+        if let Some(ref l) = result {
+            self.index += l.span.len();
         }
-        lexeme
+        result
     }
 }
 
-pub struct BufferedIterator<Item: Copy, Iter: Iterator<Item=Item>> {
+pub struct BufferedIterator<Item, Iter: Iterator<Item=Item>> {
     iter: Iter,
-    buffer: VecDeque<Item>
+    buffer: VecDeque<Item>,
+    peek_cursor: usize
 }
 
-impl<Item: Copy + Default, Iter: Iterator<Item=Item>> BufferedIterator<Item, Iter> {
+impl<Item, Iter: Iterator<Item=Item>> BufferedIterator<Item, Iter> {
     pub(crate) fn new(iter: Iter) -> Self {
         Self {
             iter,
-            buffer: VecDeque::new()
+            buffer: VecDeque::new(),
+            peek_cursor: 0
         }
     }
 
-    pub fn next(&mut self) -> Option<Item> {
-        self.buffer.pop_front()
-            .or_else(|| self.iter.next())
-    }
-
-    pub fn next_chunk<const N: usize>(&mut self) -> Option<[Item; N]> {
-        let buffer_len = self.buffer.len();
-        let mut result = [Item::default(); N];
-        if buffer_len >= N {
-            let mut index = 0;
-            self.buffer.drain(..N).for_each(|item| {
-                result[index] = item;
-                index += 1;
-            });
-            return Some(result);
-        } else {
-            let mut index = buffer_len;
-            while let Some(item) = self.iter.next() {
-                result[index] = item;
-                index += 1;
-                if index == N {
-                    if buffer_len != 0 {
-                        index = 0;
-                        self.buffer.drain(..).for_each(|item| {
-                            result[index] = item;
-                            index += 1;
-                        });
-                    }
-                    return Some(result);
-                }
+    pub fn peek_chunk(&mut self, n: usize) -> Option<&[Item]> {
+        let pull_from_iterator = (self.peek_cursor + n).saturating_sub(self.buffer.len());
+        for _ in 0..pull_from_iterator {
+            if let Some(item) = self.iter.next() {
+                self.buffer.push_back(item);
+            } else {
+                return None;
             }
-            return None;
         }
+        self.peek_cursor += n;
+        Some(&self.buffer.make_contiguous()[self.peek_cursor - n..self.peek_cursor])
+    }
+
+    pub fn reset_to(&mut self, n: usize) {
+        self.buffer.drain(..n);
+        self.peek_cursor = 0;
     }
 }

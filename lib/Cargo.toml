@@ -13,6 +13,7 @@ categories = ["algorithms", "parsing", "text-processing"]
 [dependencies]
 parce_macros = { path = "../macros", version = "0.0.1" }
 logos = { version = "0.12.1", optional = true }
+shrinkwraprs = "0.3.0"
 
 [dev-dependencies]
 logos = { version = "0.12.1" }

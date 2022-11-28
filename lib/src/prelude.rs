@@ -1,13 +1,13 @@
 #[doc(inline)]
-pub use parce_macros::lexer;
+pub use parce_macros::parce;
 
 pub use crate::{
-    Lexeme,
-    Lexer,
+    Sentence,
+    Parce,
     compatability::ConvertToParceExt,
     iterator::{
-        IteratorToLexerExt,
-        SliceToLexerExt,
-        StrToLexerExt
+        IteratorToParceExt,
+        SliceToParceExt,
+        StrToParceExt
     }
 };

@@ -1,7 +1,7 @@
 use parce::prelude::*;
 use logos::Logos;
 
-#[lexer(MyLexer)]
+#[parce(MyLexer)]
 #[derive(Debug, PartialEq, Eq)]
 enum MyToken {
     AA = "aa",

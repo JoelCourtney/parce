@@ -46,7 +46,7 @@ impl Tree {
                 }).unzip();
                 let match_expr = match source {
                     ItemSource::Slice => quote! {input.get(#index..#index+#length)},
-                    ItemSource::BufferedIter => quote! {input.next_chunk::<#length>()}
+                    ItemSource::BufferedIter => quote! {input.peek_chunk( #length )}
                 };
                 quote! {
                     match #match_expr {
@@ -61,16 +61,27 @@ impl Tree {
             // Tree::Loop(_) => {todo!()}
             // Tree::Break(_) => todo!(),
             Tree::Ok { result, .. } => {
+                let drop_expr = match source {
+                    ItemSource::Slice => quote! {},
+                    ItemSource::BufferedIter => quote! { input.reset_to( #index ); }
+                };
                 quote! {
-                    Some(parce::Lexeme {
-                        start: 0,
-                        length: #index,
-                        token: #result
+                    #drop_expr
+                    Some(parce::Sentence {
+                        data: #result,
+                        span: 0..#index
                     })
                 }
             }
             Tree::Err => {
-                quote! { None }
+                let drop_expr = match source {
+                    ItemSource::Slice => quote! {},
+                    ItemSource::BufferedIter => quote! { input.reset_to( 0 ); }
+                };
+                quote! {
+                    #drop_expr
+                    None
+                }
             }
         }
     }

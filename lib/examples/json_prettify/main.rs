@@ -1,7 +1,7 @@
 use parce::prelude::*;
 
-#[lexer(JsonLexer)]
 #[derive(Debug)]
+#[parce(JsonLexer)]
 enum JsonToken {
     OBrace = '{',
     CBrace = '}',
@@ -13,8 +13,6 @@ enum JsonToken {
     True = "true",
     False = "false",
     Null = "null",
-
-    #[skip]
     Else = p!(.)
 }
 
